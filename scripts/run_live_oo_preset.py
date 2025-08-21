@@ -514,7 +514,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p = argparse.ArgumentParser(description="Run the live OO flow against a preset workspace/boards (no structural mutations)")
     p.add_argument("--token", default=cfg.get("MONDAY_API_TOKEN") or cfg.get("token"), help="API token (or set in tests/config.json)")
-    p.add_argument("--api-version", default=str(cfg.get("API_VERSION") or "2025-04"))
+    p.add_argument("--api-version", default=str(cfg.get("API_VERSION") or "2025-10"))
     p.add_argument("--endpoint", default=cfg.get("ENDPOINT") or "https://api.monday.com/v2")
     p.add_argument("--files-endpoint", default=cfg.get("FILES_ENDPOINT") or "https://api.monday.com/v2/file")
     p.add_argument("--max-retries", type=int, default=int(cfg.get("MAX_RETRIES") or 3))

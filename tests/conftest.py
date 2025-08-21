@@ -33,7 +33,7 @@ def client_live(_test_config: dict):
         )
 
     # Optional client tuning via config.json (no env vars)
-    api_version = _test_config.get("API_VERSION") or "2025-04"
+    api_version = _test_config.get("API_VERSION") or "2025-10"
     def _as_int(val, default):
         try:
             return int(val)
