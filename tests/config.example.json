@@ -1,0 +1,22 @@
+{
+  "MONDAY_API_TOKEN": "paste-your-token-here",
+  "token": "paste-your-token-here",
+  "PRESET_NAMES": {
+    "workspace": "API_TESTS",
+    "boards": { "a": "API_TESTS_A", "b": "API_TESTS_B" },
+    "groups": { "primary": "topics" },
+    "columns": {
+      "text": "Text",
+      "number": "Number",
+      "status": "Status",
+      "date": "Due Date",
+      "link": "Link",
+      "files": "Files",
+      "doc": "Doc",
+      "people": "Assignee",
+      "connect": "Related"
+    }
+  }
+}
+
+

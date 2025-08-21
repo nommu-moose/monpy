@@ -1,0 +1,95 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "monpy"
+dynamic = ["version"]
+description = "Lightweight synchronous client for the monday.com GraphQL API"
+readme = { file = "README.md", content-type = "text/markdown" }
+requires-python = ">=3.10"
+authors = [
+  { name = "Your Name", email = "you@example.com" }
+]
+license = { file = "LICENSE" }
+dependencies = [
+  "requests>=2.28,<3"
+]
+keywords = ["monday.com", "graphql", "api", "client"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Topic :: Software Development :: Libraries",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3 :: Only",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/your-org/monpy"
+Repository = "https://github.com/your-org/monpy"
+Issues = "https://github.com/your-org/monpy/issues"
+Documentation = "https://github.com/your-org/monpy#readme"
+
+[tool.hatch.version]
+path = "src/monpy/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/monpy"]
+include = [
+  "src/monpy/py.typed",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "src/monpy/**",
+  "README.md",
+  "pyproject.toml",
+  "LICENSE",
+  "tests/**",
+]
+
+[tool.hatch.envs.default]
+dependencies = [
+  "pytest>=7.0",
+]
+
+[tool.hatch.envs.test]
+dependencies = [
+  "pytest>=7.0",
+  "pytest-cov>=4.0",
+  "requests>=2.28,<3",
+]
+
+[tool.hatch.envs.dev]
+dependencies = [
+  "ruff>=0.4",
+  "mypy>=1.10",
+]
+
+[tool.hatch.envs.dev.scripts]
+lint = "ruff check ."
+fmt = "ruff format ."
+typecheck = "mypy src/monpy"
+
+[tool.hatch.envs.test.scripts]
+tests = "pytest -q"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "live: marks tests that hit the real monday.com API",
+]
+addopts = "--cov=monpy --cov-report=term-missing --cov-fail-under=70"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+
