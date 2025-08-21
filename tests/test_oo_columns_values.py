@@ -1,7 +1,7 @@
 import types
 from datetime import date, datetime
 
-from monpy.oo.columns.values import _encode_value, _decode_value
+from monpy.oo.columns.values import _encode_value, _decode_value, LocationValue
 
 
 def test_encode_value_variants():
@@ -28,5 +28,21 @@ def test_decode_value_variants():
     assert _decode_value("tags", {"value": {"tag_ids": [5]}, "text": None}) == [5]
     assert _decode_value("link", {"value": {"url": "http://x"}, "text": None}) == "http://x"
     assert _decode_value("doc", {"value": {"files": [{"objectId": "abc"}]}, "text": None}) == "abc"
+
+
+def test_location_encode_decode_roundtrip():
+    lv = LocationValue(address="1600 Amphitheatre Pkwy, Mountain View, CA", city="Mountain View", state="CA", country="United States", country_code="US", zip="94043", lat=37.4220, lng=-122.0841)
+    encoded = _encode_value("location", lv)
+    assert isinstance(encoded, dict) and encoded.get("address")
+    decoded = _decode_value("location", {"value": encoded, "text": "Googleplex"})
+    assert isinstance(decoded, LocationValue)
+    assert decoded.city == "Mountain View"
+    assert decoded.text == "Googleplex"
+
+    # Accept plain string
+    encoded2 = _encode_value("location", "Paris, France")
+    assert encoded2 == {"address": "Paris, France"}
+    decoded2 = _decode_value("location", {"value": {"address": "Paris, France"}, "text": "Paris, France"})
+    assert isinstance(decoded2, LocationValue) and (decoded2.address or decoded2.text)
 
 

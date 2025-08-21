@@ -1284,6 +1284,38 @@ class MondayClient:
                         # leave the original string if it isn’t valid JSON
                         pass
 
+            # Best-effort normalization: some API versions may not populate
+            # the human-readable text for Location columns immediately. When
+            # missing, synthesize it from the structured value so callers see
+            # a useful string.
+            for cv in item.get("column_values", []):
+                try:
+                    if (cv.get("type") == "location") and (not cv.get("text")):
+                        val = cv.get("value")
+                        computed: str | None = None
+                        if isinstance(val, dict):
+                            computed = (
+                                val.get("address")
+                                or val.get("formattedAddress")
+                                or val.get("formatted_address")
+                            )
+                            if not computed:
+                                # Compose from parts when full address is absent
+                                parts = [
+                                    val.get("street") or val.get("street_name") or val.get("route"),
+                                    val.get("city") or val.get("locality"),
+                                    val.get("state") or val.get("administrative_area_level_1"),
+                                    val.get("country"),
+                                ]
+                                computed = ", ".join(p for p in parts if isinstance(p, str) and p.strip()) or None
+                        elif isinstance(val, str):
+                            computed = val
+                        if computed:
+                            cv["text"] = computed
+                except Exception:
+                    # best-effort only
+                    pass
+
         return item
 
     # -------------------------------------------------------------- X —
@@ -1450,6 +1482,34 @@ class MondayClient:
                             cv["value"] = json.loads(raw)
                         except ValueError:
                             pass
+
+                # Best-effort normalization for Location columns: ensure text
+                # is populated from the structured value when the API leaves it empty.
+                for cv in item.get("column_values", []):
+                    try:
+                        if (cv.get("type") == "location") and (not cv.get("text")):
+                            val = cv.get("value")
+                            computed: str | None = None
+                            if isinstance(val, dict):
+                                computed = (
+                                    val.get("address")
+                                    or val.get("formattedAddress")
+                                    or val.get("formatted_address")
+                                )
+                                if not computed:
+                                    parts = [
+                                        val.get("street") or val.get("street_name") or val.get("route"),
+                                        val.get("city") or val.get("locality"),
+                                        val.get("state") or val.get("administrative_area_level_1"),
+                                        val.get("country"),
+                                    ]
+                                    computed = ", ".join(p for p in parts if isinstance(p, str) and p.strip()) or None
+                            elif isinstance(val, str):
+                                computed = val
+                            if computed:
+                                cv["text"] = computed
+                    except Exception:
+                        pass
 
         return data
 

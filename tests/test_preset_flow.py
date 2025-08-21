@@ -104,7 +104,7 @@ def test_preset_oo(client_live, _test_config):
 
     # Best-effort webhook (may not be permitted)
     try:
-        bd1.register_webhook(url="https://example.com/monpy-preset", event="item_created")
+        bd1.register_webhook(url="https://eo4xstnn32il7em.m.pipedream.net", event="item_created")
     except MondayAPIError:
         pass
 

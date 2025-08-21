@@ -17,6 +17,7 @@ from datetime import date, datetime
 from typing import Optional, Union, List, Tuple
 
 from monpy.oo.item import Item
+from monpy.oo.columns.values import LocationValue
 
 """
 
@@ -35,6 +36,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Optional, Union, List, Tuple
 from monpy.oo.item import Item
+from monpy.oo.columns.values import LocationValue
 class {class_name}(Item):
 {stub_properties}
 """
@@ -69,6 +71,8 @@ def _getter_type(col_type: str) -> str:
         return "Optional[str]"
     if t in ("doc",):
         return "Optional[str]"  # objectId
+    if t in ("location",):
+        return "Optional[LocationValue]"
     return "object"
 
 
@@ -88,6 +92,8 @@ def _setter_type(col_type: str) -> str:
         return "Union[str, Tuple[str, str]]"
     if t in ("doc",):
         return "Optional[str]"
+    if t in ("location",):
+        return "Optional[Union[str, dict, LocationValue]]"
     return "object"
 
 

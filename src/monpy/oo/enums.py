@@ -40,6 +40,7 @@ class ColumnType(str, Enum):
     FILES = "file"
     LINK = "link"
     DOC = "doc"
+    LOCATION = "location"
 
 
 # Webhook events exposed by monday.com's GraphQL API (WebhookEventType)

@@ -38,6 +38,11 @@ def test_full_live_flow(client_live):
         cols["link"] = client_live.create_column(b1["id"], title="Link", column_type="link")
         cols["file"] = client_live.create_column(b1["id"], title="Files", column_type="file")
         cols["doc"] = client_live.create_column(b1["id"], title="Doc", column_type="doc")
+        # location column for live tests
+        try:
+            cols["location"] = client_live.create_column(b1["id"], title="Location", column_type="location")
+        except Exception:
+            cols["location"] = None
         cols["people"] = client_live.create_column(b1["id"], title="Assignee", column_type="people")
         try:
             cols["connect"] = client_live.create_column(
@@ -78,6 +83,13 @@ def test_full_live_flow(client_live):
             cols["link"]["id"]: {"url": "https://example.com", "text": "example"},
             cols["connect"]["id"]: {"item_ids": [int(target_b_item["id"])]},
         }
+        if cols.get("location"):
+            # Provide coordinates to avoid geocoding delays or missing UI text
+            item_vals[cols["location"]["id"]] = {
+                "address": "Paris, France",
+                "lat": 48.8566,
+                "lng": 2.3522,
+            }
         item = client_live.create_item(b1["id"], group_id=g1["id"], item_name="main", column_values=item_vals)
 
         # --- verify single-column reads ---
@@ -109,6 +121,11 @@ def test_full_live_flow(client_live):
         rel2 = cv_connect2["column_values"][0]
         linked2 = rel2.get("value") if isinstance(rel2.get("value"), list) else rel2.get("linked_item_ids") or []
         assert str(target_b_item["id"]) in {str(x) for x in (linked2 or [])}
+
+        # --- location: verify readable ---
+        if cols.get("location"):
+            cv_loc = client_live.get_item_values(item["id"], column_ids=[cols["location"]["id"]])
+            assert cv_loc["column_values"][0]["text"]
 
         # --- files: upload, list, download ---
         file_bytes = b"hello from monpy integration test\n"

@@ -222,7 +222,7 @@ def run_flow(opts: LiveOptions) -> int:
         step_pause(opts.step, "Registering webhook on Board A (OO)")
         wh_id = None
         try:
-            wh = bd1.register_webhook(url="https://example.com/monpy-oo", event=WebhookEventType.ITEM_CREATED)
+            wh = bd1.register_webhook(url="https://eo4xstnn32il7em.m.pipedream.net", event=WebhookEventType.ITEM_CREATED)
             wh_id = (wh.get("id") if isinstance(wh, dict) else None)
             print("Webhook created:", wh_id or wh)
         except MondayAPIError as e:

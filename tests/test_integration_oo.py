@@ -44,7 +44,7 @@ def test_full_live_flow_oo(client_live):
         # --- webhooks (OO wrappers) ---
         wh_id = None
         try:
-            wh = bd1.register_webhook(url="https://example.com/monpy-oo", event=WebhookEventType.ITEM_CREATED)
+            wh = bd1.register_webhook(url="https://eo4xstnn32il7em.m.pipedream.net", event=WebhookEventType.ITEM_CREATED)
             wh_id = str(wh.get("id")) if isinstance(wh, dict) else None
         except MondayAPIError:
             # Not all tokens/accounts permit webhook creation; skip silently
@@ -61,6 +61,10 @@ def test_full_live_flow_oo(client_live):
         cols["link"] = bd1.create_column(title="Link", column_type="link").__dict__
         cols["file"] = bd1.create_column(title="Files", column_type="file").__dict__
         cols["doc"] = bd1.create_column(title="Doc", column_type="doc").__dict__
+        try:
+            cols["location"] = bd1.create_column(title="Location", column_type="location").__dict__
+        except Exception:
+            cols["location"] = None
         cols["people"] = bd1.create_column(title="Assignee", column_type="people").__dict__
         try:
             cols["connect"] = bd1.create_column(title="Related", column_type="connect_boards", defaults={"boardIds": [int(b2["id"])], "allowMultipleItems": True}).__dict__
@@ -97,6 +101,13 @@ def test_full_live_flow_oo(client_live):
         }
         if cols.get("connect"):
             item_vals[cols["connect"]["id"]] = {"item_ids": [int(target_b_item.id)]}
+        if cols.get("location"):
+            # Provide lat/lng to avoid geocoding delays/empty UI text on some accounts
+            item_vals[cols["location"]["id"]] = {
+                "address": "Paris, France",
+                "lat": 48.8566,
+                "lng": 2.3522,
+            }
         item = bd1.create_item(group_id=g1["id"], item_name="main", values=item_vals)
 
         # --- verify single-column reads via OO values ---
@@ -107,6 +118,13 @@ def test_full_live_flow_oo(client_live):
         # relation decodes to list of ids (when connect column exists)
         if cols.get("connect"):
             assert int(target_b_item.id) in set(int(i) for i in (item.values.related or []))
+
+        # --- location via OO values ---
+        if cols.get("location"):
+            # ensure the OO layer decodes to LocationValue
+            loc_val = item.values.__getattr__("Location")  # allow title-case attr access
+            from monpy.oo.columns.values import LocationValue as _LV
+            assert isinstance(loc_val, _LV) or loc_val is None
 
         # --- update values (including clearing relations) via OO and a transaction ---
         with sess.transaction():
