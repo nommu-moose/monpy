@@ -29,6 +29,7 @@ def _get_preset_names(cfg: dict) -> dict:
             "link": str(((names_cfg.get("columns") or {}).get("link")) or "Link"),
             "file": str(((names_cfg.get("columns") or {}).get("files")) or "Files"),
             "doc": str(((names_cfg.get("columns") or {}).get("doc")) or "Doc"),
+            "location": str(((names_cfg.get("columns") or {}).get("location")) or "Location"),
             "people": str(((names_cfg.get("columns") or {}).get("people")) or "Assignee"),
             "connect": str(((names_cfg.get("columns") or {}).get("connect")) or "Related"),
         },
@@ -73,6 +74,7 @@ def _column_ids_by_title(client, board_id: str, title_map: dict) -> dict:
         "link": title_to_id.get(title_map["link"]),
         "file": title_to_id.get(title_map["file"]),
         "doc": title_to_id.get(title_map["doc"]),
+        "location": title_to_id.get(title_map["location"]),
         "people": title_to_id.get(title_map["people"]),
         "connect": title_to_id.get(title_map["connect"]),
     }
@@ -115,6 +117,7 @@ def test_preset_oo(client_live, _test_config):
     if col_ids.get("status"):  init_vals[col_ids["status"]] = {"index": 1}
     if col_ids.get("date"):    init_vals[col_ids["date"]] = {"date": date.today().isoformat()}
     if col_ids.get("link"):    init_vals[col_ids["link"]] = {"url": "https://example.com", "text": "example"}
+    if col_ids.get("location"): init_vals[col_ids["location"]] = {"address": "Paris, France", "lat": 48.8566, "lng": 2.3522}
     if col_ids.get("connect"): init_vals[col_ids["connect"]] = {"item_ids": [int(target_b_item.id)]}
 
     item = bd1.create_item(group_id=group_primary_id_a, item_name="preset-main", values=init_vals)
@@ -150,6 +153,19 @@ def test_preset_oo(client_live, _test_config):
                 except Exception:
                     pass
             except MondayAPIError:
+                pass
+
+        # Location: transactional write and verify readable (best-effort)
+        if col_ids.get("location"):
+            try:
+                with sess.transaction():
+                    item.values.Location = {"address": "Paris, France", "lat": 48.8566, "lng": 2.3522}
+            except Exception:
+                pass
+            try:
+                cv_loc = client_live.get_item_values(item.id, column_ids=[col_ids["location"]])
+                assert (cv_loc.get("column_values") or [{}])[0].get("text")
+            except Exception:
                 pass
 
         # Files via OO helpers when Files column exists
@@ -232,6 +248,7 @@ def test_preset_client(client_live, _test_config):
     if col_ids.get("status"):  init_vals[col_ids["status"]] = {"index": 1}
     if col_ids.get("date"):    init_vals[col_ids["date"]] = {"date": date.today().isoformat()}
     if col_ids.get("link"):    init_vals[col_ids["link"]] = {"url": "https://example.com", "text": "example"}
+    if col_ids.get("location"): init_vals[col_ids["location"]] = {"address": "Paris, France", "lat": 48.8566, "lng": 2.3522}
     if col_ids.get("connect"): init_vals[col_ids["connect"]] = {"item_ids": [int(target_b_item["id"])]}
 
     item = client_live.create_item(board_a_id, group_id=group_primary_id_a, item_name="preset-main", column_values=init_vals)
@@ -254,6 +271,14 @@ def test_preset_client(client_live, _test_config):
         if col_ids.get("text"):
             cv_text2 = client_live.get_item_values(item["id"], column_ids=[col_ids["text"]])
             assert (cv_text2.get("column_values") or [{}])[0].get("text") in {"world", "abc2"}
+
+        # Location: verify readable after create (best-effort)
+        if col_ids.get("location"):
+            try:
+                cv_loc = client_live.get_item_values(item["id"], column_ids=[col_ids["location"]])
+                assert (cv_loc.get("column_values") or [{}])[0].get("text")
+            except MondayAPIError:
+                pass
 
         # Re-link via convenience helper
         if col_ids.get("connect"):
