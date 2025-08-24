@@ -123,9 +123,16 @@ class Board(BaseModel):
 
     # Iteration over items (paged)
     def iter_items(self, *, limit_per_page: int = 200, state: str | list[str] | None = "active") -> Iterator[dict]:
+        client = self._session.client
+        # Prefer client iterator when available (newer client)
+        it = getattr(client, "iter_items", None)
+        if callable(it):
+            yield from it(self.id, page_size=limit_per_page, state=state)
+            return
+        # Fallback to manual cursor loop for older / fake clients used in tests
         cursor: Optional[str] = None
         while True:
-            items, cursor = self._session.client.list_items(self.id, limit=limit_per_page, state=state, cursor=cursor)
+            items, cursor = client.list_items(self.id, limit=limit_per_page, state=state, cursor=cursor)
             if not items:
                 break
             for it in items:

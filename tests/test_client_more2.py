@@ -154,6 +154,11 @@ def test_items_move_duplicate_and_groups(monkeypatch):
     items = c.items_by_column_values("B", column_id="status", column_value={"index": 1})
     assert items and items[0]["id"] == "1"
 
+    # iter variant falls back to legacy
+    c.query = q1
+    got = list(c.iter_items_by_column_values("B", column_id="status", column_value={"index": 1}, page_size=5))
+    assert got and got[0]["id"] == "1"
+
     # duplicate_item
     def m1(q, v):
         assert "duplicate_item" in q and v["id"] == "I"

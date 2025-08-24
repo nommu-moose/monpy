@@ -80,21 +80,25 @@ class Session:
             op()
 
     def _execute_batched_item_updates(self, updates: List[tuple[str, str, Dict[str, Any]]]) -> None:
-        # Build one mutation with aliases
-        parts: List[str] = []
-        var_decls: List[str] = []
-        vars_payload: Dict[str, Any] = {}
-        for idx, (board_id, item_id, values) in enumerate(updates, start=1):
-            parts.append(
-                f"u{idx}: change_multiple_column_values(board_id:$b{idx}, item_id:$i{idx}, column_values:$v{idx}){{ id }}"
-            )
-            var_decls.extend([f"$b{idx}: ID!", f"$i{idx}: ID!", f"$v{idx}: JSON!"])
-            vars_payload[f"b{idx}"] = board_id
-            vars_payload[f"i{idx}"] = item_id
-            vars_payload[f"v{idx}"] = json.dumps(values)
+        # Send in safe chunks to avoid GraphQL limits
+        max_ops = 50
+        for start in range(0, len(updates), max_ops):
+            chunk = updates[start : start + max_ops]
+            parts: List[str] = []
+            var_decls: List[str] = []
+            vars_payload: Dict[str, Any] = {}
+            for idx, (board_id, item_id, values) in enumerate(chunk, start=1):
+                parts.append(
+                    f"u{idx}: change_multiple_column_values(board_id:$b{idx}, item_id:$i{idx}, column_values:$v{idx}){{ id }}"
+                )
+                var_decls.extend([f"$b{idx}: ID!", f"$i{idx}: ID!", f"$v{idx}: JSON!"])
+                vars_payload[f"b{idx}"] = board_id
+                vars_payload[f"i{idx}"] = item_id
+                vars_payload[f"v{idx}"] = json.dumps(values)
 
-        mutation = f"mutation({', '.join(var_decls)}) {{ {' '.join(parts)} }}"
-        self.client.mutation(mutation, vars_payload)
+            if parts:
+                mutation = f"mutation({', '.join(var_decls)}) {{ {' '.join(parts)} }}"
+                self.client.mutation(mutation, vars_payload)
 
     # --- factories (lazy loads) ---------------------------------------
     def workspace(self, workspace_id: str):

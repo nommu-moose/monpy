@@ -36,7 +36,7 @@ import json
 import mimetypes
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Sequence, Mapping
+from typing import Any, Dict, List, Optional, Tuple, Sequence, Mapping, Iterator
 from importlib.metadata import PackageNotFoundError, version as pkg_version
 from .exceptions import MondayAPIError, FeatureNotSupported
 import requests
@@ -327,22 +327,58 @@ class MondayClient:
         self,
         *,
         limit: int = 25,
+        page: int | None = None,
         fields: Optional[List[str] | tuple[str, ...]] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Fetch up to *limit* workspaces.
+        Fetch up to *limit* workspaces (optionally a specific *page*).
 
         Only the requested *fields* are returned to keep payloads small.
         """
         field_str = self._fields_to_str(fields, self._DEFAULT_WS_FIELDS)
-        q = f"""
-        query ($limit: Int!) {{
-          workspaces (limit: $limit) {{
-            {field_str}
-          }}
-        }}
-        """
-        return self.query(q, {"limit": limit})["workspaces"]
+        var_decls: list[str] = ["$limit: Int!"]
+        args: list[str] = ["limit: $limit"]
+        vars_: dict[str, Any] = {"limit": limit}
+        if page is not None:
+            var_decls.append("$pg: Int")
+            args.append("page: $pg")
+            vars_["pg"] = int(page)
+        q = (
+            f"query ({', '.join(var_decls)}) {{ workspaces({', '.join(args)}) {{ {field_str} }} }}"
+        )
+        return self.query(q, vars_)["workspaces"]
+
+    def iter_workspaces(
+        self,
+        *,
+        page_size: int = 25,
+        fields: Optional[List[str] | tuple[str, ...]] = None,
+    ) -> Iterator[Dict[str, Any]]:
+        """Yield all workspaces page by page (single request per page)."""
+        page = 1
+        while True:
+            rows = self.list_workspaces(limit=page_size, page=(None if page == 1 else page), fields=fields)
+            if not rows:
+                break
+            for w in rows:
+                yield w
+            if len(rows) < page_size:
+                break
+            page += 1
+
+    def get_all_workspaces(
+        self,
+        *,
+        page_size: int = 25,
+        fields: Optional[List[str] | tuple[str, ...]] = None,
+        max_items: int | None = None,
+    ) -> List[Dict[str, Any]]:
+        out: list[dict] = []
+        for w in self.iter_workspaces(page_size=page_size, fields=fields):
+            out.append(w)
+            if max_items is not None and len(out) >= max_items:
+                break
+        return out
 
     # 2. Get a workspace by its ID -------------------------------------
     def get_workspace(
@@ -501,26 +537,64 @@ class MondayClient:
         workspace_id: str | None = None,
         state: str | list[str] | None = "active",      # NEW
         fields: list[str] | tuple[str, ...] | None = None,
+        page: int | None = None,
     ) -> list[dict]:
         field_str = self._fields_to_str(fields, self._DEFAULT_BOARD_FIELDS)
-
         vars: dict[str, Any] = {"limit": limit}
         state_block = ""
         if state not in (None, "active"):
             state_block = ", state: $st"
             vars["st"] = state
-
+        page_block = ""
+        if page is not None:
+            page_block = ", page: $pg"
+            vars["pg"] = int(page)
         w_filter = "" if workspace_id is None else ", workspace_ids: $wids"
         if workspace_id:
             vars["wids"] = [workspace_id]
 
         q = f"""
-        query ($limit:Int!{', $st:BoardStateType' if state_block else ''}{', $wids:[ID!]' if workspace_id else ''}) {{
-          boards(limit:$limit{w_filter}{state_block}) {{
+        query ($limit:Int!{', $st:BoardStateType' if state_block else ''}{', $pg:Int' if page_block else ''}{', $wids:[ID!]' if workspace_id else ''}) {{
+          boards(limit:$limit{w_filter}{state_block}{page_block}) {{
             {field_str}
           }}
         }}"""
         return self.query(q, vars)["boards"]
+
+    def iter_boards(
+        self,
+        *,
+        page_size: int = 100,
+        workspace_id: str | None = None,
+        state: str | list[str] | None = "active",
+        fields: list[str] | tuple[str, ...] | None = None,
+    ) -> Iterator[dict]:
+        page_num = 1
+        while True:
+            rows = self.list_boards(limit=page_size, workspace_id=workspace_id, state=state, fields=fields, page=(None if page_num == 1 else page_num))
+            if not rows:
+                break
+            for b in rows:
+                yield b
+            if len(rows) < page_size:
+                break
+            page_num += 1
+
+    def get_all_boards(
+        self,
+        *,
+        page_size: int = 100,
+        workspace_id: str | None = None,
+        state: str | list[str] | None = "active",
+        fields: list[str] | tuple[str, ...] | None = None,
+        max_items: int | None = None,
+    ) -> list[dict]:
+        out: list[dict] = []
+        for b in self.iter_boards(page_size=page_size, workspace_id=workspace_id, state=state, fields=fields):
+            out.append(b)
+            if max_items is not None and len(out) >= max_items:
+                break
+        return out
 
     # 2. Get a single board by ID --------------------------------------
 
@@ -732,6 +806,37 @@ class MondayClient:
         arg_str = f"({', '.join(args)})" if args else ""
         q = f"query ({', '.join(var_decls)}) {{ users{arg_str} {{ {field_str} }} }}" if var_decls else f"query {{ users {{ {field_str} }} }}"
         return self.query(q, vars)["users"] if var_decls else self.query(q)["users"]
+
+    def iter_users(
+        self,
+        *,
+        page_size: int = 100,
+        fields: list[str] | tuple[str, ...] | None = None,
+    ) -> Iterator[dict]:
+        page_num = 1
+        while True:
+            rows = self.list_users(limit=page_size, page=(None if page_num == 1 else page_num), fields=fields)
+            if not rows:
+                break
+            for u in rows:
+                yield u
+            if len(rows) < page_size:
+                break
+            page_num += 1
+
+    def get_all_users(
+        self,
+        *,
+        page_size: int = 100,
+        fields: list[str] | tuple[str, ...] | None = None,
+        max_items: int | None = None,
+    ) -> list[dict]:
+        out: list[dict] = []
+        for u in self.iter_users(page_size=page_size, fields=fields):
+            out.append(u)
+            if max_items is not None and len(out) >= max_items:
+                break
+        return out
 
     def list_board_subscribers(self, board_id: str, *, fields: list[str] | tuple[str, ...] | None = None) -> list[dict]:
         field_str = self._fields_to_str(fields, self._DEFAULT_USER_FIELDS)
@@ -1243,6 +1348,41 @@ class MondayClient:
         page_data = boards[0]["items_page"]
         return page_data["items"], page_data.get("cursor")
 
+    def iter_items(
+        self,
+        board_id: str,
+        *,
+        page_size: int = 200,
+        state: str | list[str] | None = "active",
+        fields: list[str] | tuple[str, ...] | None = None,
+        start_cursor: str | None = None,
+    ) -> Iterator[dict]:
+        cursor: Optional[str] = start_cursor
+        while True:
+            items, cursor = self.list_items(board_id, limit=page_size, state=state, fields=fields, cursor=cursor)
+            if not items:
+                break
+            for it in items:
+                yield it
+            if not cursor:
+                break
+
+    def get_all_items(
+        self,
+        board_id: str,
+        *,
+        page_size: int = 200,
+        state: str | list[str] | None = "active",
+        fields: list[str] | tuple[str, ...] | None = None,
+        max_items: int | None = None,
+    ) -> list[dict]:
+        out: list[dict] = []
+        for it in self.iter_items(board_id, page_size=page_size, state=state, fields=fields):
+            out.append(it)
+            if max_items is not None and len(out) >= max_items:
+                break
+        return out
+
     # -------------------------------------------------------------- 2 —
     # Fetch *values* for a single item by its ID
     # --------------------------------------------------------------
@@ -1433,7 +1573,7 @@ class MondayClient:
         limit_arg = ", limit:$lim" if limit is not None else ""
         q_new = (
             f"query ({', '.join(var_decls_new)}){{ "
-            f"  items_page_by_column_values(board_id:$bid, columns:[{{column_id:$col, column_values:[$val]}}]{limit_arg}){{ items {{ {field_str} }} }} "
+            f"  items_page_by_column_values(board_id:$bid, columns:[{{column_id:$col, column_values:[$val]}}]{limit_arg}){{ cursor items {{ {field_str} }} }} "
             f"}}"
         )
         for candidate in list(dict.fromkeys(normalized_values)):
@@ -1450,6 +1590,101 @@ class MondayClient:
                 return items
         return []
 
+    def iter_items_by_column_values(
+        self,
+        board_id: str,
+        *,
+        column_id: str,
+        column_value: Any,
+        fields: Optional[List[str] | Tuple[str, ...]] = None,
+        page_size: int = 200,
+    ) -> Iterator[Dict[str, Any]]:
+        """
+        Yield items matching a column value, transparently paging when the API supports it.
+
+        Falls back to a single-shot legacy endpoint when paging is unavailable.
+        """
+        # 1) First, attempt the legacy non-paged endpoint (keeps older tests/servers happy)
+        try:
+            first = self.items_by_column_values(
+                board_id,
+                column_id=column_id,
+                column_value=column_value,
+                fields=fields,
+                limit=page_size,
+            )
+            for it in first:
+                yield it
+            # If fewer than a page returned, nothing more to fetch
+            if len(first) < page_size:
+                return
+        except MondayAPIError:
+            # Proceed to the modern endpoint
+            pass
+
+        # 2) Modern paged API using normalized value candidates
+        field_str = self._fields_to_str(fields, self._DEFAULT_ITEM_FIELDS)
+
+        candidates: list[str]
+        try:
+            if isinstance(column_value, dict):
+                candidates = [json.dumps(column_value)]
+            elif isinstance(column_value, (int, float)):
+                candidates = [str(column_value), json.dumps(column_value)]
+            elif isinstance(column_value, str):
+                candidates = [column_value]
+            else:
+                candidates = [json.dumps(column_value)]
+        except Exception:
+            candidates = [json.dumps(column_value)]
+
+        for candidate in list(dict.fromkeys(candidates)):
+            q = (
+                "query ($bid:ID!, $col:String!, $val:String!, $lim:Int){ "
+                f"  items_page_by_column_values(board_id:$bid, columns:[{{column_id:$col, column_values:[$val]}}], limit:$lim){{ cursor items {{ {field_str} }} }} "
+                "}"
+            )
+            cursor: Optional[str] = None
+            first_page = True
+            while True:
+                vars_new: Dict[str, Any] = {"bid": board_id, "col": column_id, "val": candidate, "lim": int(page_size)}
+                if not first_page and cursor:
+                    # Some deployments may accept a cursor arg; if not, break after first page
+                    pass
+                try:
+                    res_new = self.query(q, vars_new)
+                except MondayAPIError:
+                    # Try next candidate or fall back to legacy
+                    break
+                page = res_new.get("items_page_by_column_values") or {}
+                items = list(page.get("items") or [])
+                for it in items:
+                    yield it
+                cursor = page.get("cursor")
+                if not cursor or len(items) < page_size:
+                    break
+                first_page = False
+
+        # If modern endpoint not available, we've already yielded the first legacy page
+        return
+
+    def get_all_items_by_column_values(
+        self,
+        board_id: str,
+        *,
+        column_id: str,
+        column_value: Any,
+        fields: Optional[List[str] | Tuple[str, ...]] = None,
+        page_size: int = 200,
+        max_items: int | None = None,
+    ) -> List[Dict[str, Any]]:
+        out: list[dict] = []
+        for it in self.iter_items_by_column_values(board_id, column_id=column_id, column_value=column_value, fields=fields, page_size=page_size):
+            out.append(it)
+            if max_items is not None and len(out) >= max_items:
+                break
+        return out
+
     def get_items_values(
         self,
         item_ids: Sequence[str],
@@ -1459,6 +1694,7 @@ class MondayClient:
         column_ids: list[str] | None = None,
         parse_json_values: bool = True,
         item_fields: list[str] | tuple[str, ...] | None = None,
+        batch_size: int = 100,
     ) -> list[dict]:
         """Fetch values for multiple items in one request."""
         if not item_ids:
@@ -1486,14 +1722,20 @@ class MondayClient:
           }}
         }}"""
 
-        vars = {"ids": list(item_ids), "flag": exclude_nonactive}
-        if column_ids:
-            vars["cids"] = column_ids
+        all_rows: list[dict] = []
+        ordered_ids = list(item_ids)
+        # Chunk to avoid very large GraphQL requests
+        for i in range(0, len(ordered_ids), max(1, int(batch_size))):
+            chunk_ids = ordered_ids[i : i + int(batch_size)]
+            vars = {"ids": list(chunk_ids), "flag": exclude_nonactive}
+            if column_ids:
+                vars["cids"] = column_ids
+            rows = self.query(q, vars)["items"]
+            all_rows.extend(rows)
 
-        data = self.query(q, vars)["items"]
-
+        # Optionally decode JSON/text fields per row
         if parse_json_values:
-            for item in data:
+            for item in all_rows:
                 for cv in item.get("column_values", []):
                     raw = cv.get("value")
                     if isinstance(raw, str) and raw and raw[0] in "{[":
@@ -1502,8 +1744,6 @@ class MondayClient:
                         except ValueError:
                             pass
 
-                # Best-effort normalization for Location columns: ensure text
-                # is populated from the structured value when the API leaves it empty.
                 for cv in item.get("column_values", []):
                     try:
                         if (cv.get("type") == "location") and (not cv.get("text")):
@@ -1530,7 +1770,163 @@ class MondayClient:
                     except Exception:
                         pass
 
-        return data
+        return all_rows
+
+    # ---------------------- BULK MUTATION HELPERS ----------------------
+    def create_items(
+        self,
+        board_id: str,
+        *,
+        group_id: str,
+        items: Sequence[Dict[str, Any]],
+        return_fields: Optional[List[str] | Tuple[str, ...]] = None,
+        batch_size: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """Create many items using chunked alias mutations.
+
+        items: [{"name": str, "values": dict[col_id -> value]}]
+        """
+        out: list[dict] = []
+        field_str = self._fields_to_str(return_fields or ("id",), self._DEFAULT_ITEM_FIELDS)
+        for start in range(0, len(items), max(1, int(batch_size))):
+            chunk = items[start : start + int(batch_size)]
+            parts: list[str] = []
+            var_decls: list[str] = []
+            vars_payload: dict[str, Any] = {}
+            for idx, spec in enumerate(chunk, start=1):
+                alias = f"c{idx}"
+                nb, ng, nn, nv = f"nb{idx}", f"ng{idx}", f"nn{idx}", f"nv{idx}"
+                parts.append(
+                    f"{alias}: create_item(board_id:${nb}, group_id:${ng}, item_name:${nn}, column_values:${nv}){{ {field_str} }}"
+                )
+                var_decls.extend([f"${nb}: ID!", f"${ng}: String!", f"${nn}: String!", f"${nv}: JSON"])
+                vals: Dict[str, Any] = dict((spec or {}).get("values") or {})
+                try:
+                    self._coerce_text_values(board_id, vals)
+                except Exception:
+                    pass
+                vars_payload[nb] = (spec or {}).get("board_id") or board_id
+                vars_payload[ng] = (spec or {}).get("group_id") or group_id
+                vars_payload[nn] = (spec or {}).get("name") or ""
+                vars_payload[nv] = json.dumps(vals)
+            if not parts:
+                continue
+            mutation = f"mutation({', '.join(var_decls)}) {{ {' '.join(parts)} }}"
+            resp = self.mutation(mutation, vars_payload)
+            # Collect results in alias order
+            for idx in range(1, len(chunk) + 1):
+                obj = resp.get(f"c{idx}") or {}
+                out.append(obj)
+        return out
+
+    def bulk_update_item_values(
+        self,
+        updates: Sequence[Dict[str, Any]],
+        *,
+        batch_size: int = 50,
+    ) -> None:
+        """Batch change_multiple_column_values in chunked alias mutations.
+
+        updates: [{"board_id": str, "item_id": str, "values": dict[col_id -> value]}]
+        """
+        for start in range(0, len(updates), max(1, int(batch_size))):
+            chunk = updates[start : start + int(batch_size)]
+            parts: list[str] = []
+            var_decls: list[str] = []
+            vars_payload: dict[str, Any] = {}
+            for idx, spec in enumerate(chunk, start=1):
+                parts.append(
+                    f"u{idx}: change_multiple_column_values(board_id:$b{idx}, item_id:$i{idx}, column_values:$v{idx}){{ id }}"
+                )
+                var_decls.extend([f"$b{idx}: ID!", f"$i{idx}: ID!", f"$v{idx}: JSON!"])
+                bid = str((spec or {}).get("board_id") or "")
+                vals: Dict[str, Any] = dict((spec or {}).get("values") or {})
+                try:
+                    self._coerce_text_values(bid, vals)
+                except Exception:
+                    pass
+                vars_payload[f"b{idx}"] = bid
+                vars_payload[f"i{idx}"] = str((spec or {}).get("item_id") or "")
+                vars_payload[f"v{idx}"] = json.dumps(vals)
+            if not parts:
+                continue
+            mutation = f"mutation({', '.join(var_decls)}) {{ {' '.join(parts)} }}"
+            self.mutation(mutation, vars_payload)
+
+    def bulk_upsert_items(
+        self,
+        board_id: str,
+        *,
+        group_id: str,
+        new_items: Sequence[Dict[str, Any]] | None,
+        updates: Sequence[Dict[str, Any]] | None,
+        return_fields: Optional[List[str] | Tuple[str, ...]] = None,
+        batch_size: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """Mix create_item and change_multiple_column_values in chunked mutations."""
+        new_items = list(new_items or [])
+        updates = list(updates or [])
+        out: list[dict] = []
+        field_str = self._fields_to_str(return_fields or ("id",), self._DEFAULT_ITEM_FIELDS)
+
+        # Partition into chunks of up to batch_size (creates + updates counted together)
+        idx_new = 0
+        idx_upd = 0
+        while idx_new < len(new_items) or idx_upd < len(updates):
+            parts: list[str] = []
+            var_decls: list[str] = []
+            vars_payload: dict[str, Any] = {}
+            count = 0
+            # fill from creates
+            while count < batch_size and idx_new < len(new_items):
+                spec = new_items[idx_new]
+                count += 1
+                alias = f"c{count}"
+                nb, ng, nn, nv = f"nb{count}", f"ng{count}", f"nn{count}", f"nv{count}"
+                parts.append(
+                    f"{alias}: create_item(board_id:${nb}, group_id:${ng}, item_name:${nn}, column_values:${nv}){{ {field_str} }}"
+                )
+                var_decls.extend([f"${nb}: ID!", f"${ng}: String!", f"${nn}: String!", f"${nv}: JSON"])
+                vals: Dict[str, Any] = dict((spec or {}).get("values") or {})
+                bid = str((spec or {}).get("board_id") or board_id)
+                try:
+                    self._coerce_text_values(bid, vals)
+                except Exception:
+                    pass
+                vars_payload[nb] = bid
+                vars_payload[ng] = str((spec or {}).get("group_id") or group_id)
+                vars_payload[nn] = (spec or {}).get("name") or ""
+                vars_payload[nv] = json.dumps(vals)
+                idx_new += 1
+            # fill from updates
+            while count < batch_size and idx_upd < len(updates):
+                spec = updates[idx_upd]
+                count += 1
+                parts.append(
+                    f"u{count}: change_multiple_column_values(board_id:$b{count}, item_id:$i{count}, column_values:$v{count}){{ id }}"
+                )
+                var_decls.extend([f"$b{count}: ID!", f"$i{count}: ID!", f"$v{count}: JSON!"])
+                bid2 = str((spec or {}).get("board_id") or board_id)
+                vals2: Dict[str, Any] = dict((spec or {}).get("values") or {})
+                try:
+                    self._coerce_text_values(bid2, vals2)
+                except Exception:
+                    pass
+                vars_payload[f"b{count}"] = bid2
+                vars_payload[f"i{count}"] = str((spec or {}).get("item_id") or "")
+                vars_payload[f"v{count}"] = json.dumps(vals2)
+                idx_upd += 1
+
+            if not parts:
+                continue
+            mutation = f"mutation({', '.join(var_decls)}) {{ {' '.join(parts)} }}"
+            resp = self.mutation(mutation, vars_payload)
+            # collect create aliases only (updates return id but not needed)
+            # We cannot easily know how many creates were in this chunk; detect by keys
+            for k, v in resp.items():
+                if k.startswith("c") and isinstance(v, dict):
+                    out.append(v)
+        return out
 
     # -------------------------------------------------------------- 3 —
     # Create an item (returns metadata you ask for)

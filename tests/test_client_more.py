@@ -41,6 +41,17 @@ def test_list_boards_vars_and_filters(monkeypatch):
     c.list_boards(limit=10, workspace_id="w1", state=["active", "archived"], fields=("id",))
     assert captured["limit"] == 10 and captured["wids"] == ["w1"] and captured["st"] == ["active", "archived"]
 
+    # iter_boards pages once
+    def qb2(q: str, v: dict | None = None):
+        nonlocal captured
+        captured = v or {}
+        if not captured.get("pg"):
+            return {"boards": [{"id": "1"}]}
+        return {"boards": []}
+    c.query = qb2
+    got = list(c.iter_boards(page_size=1, fields=("id",)))
+    assert got and got[0]["id"] == "1"
+
 
 def test_list_items_vars_cursor_and_state(monkeypatch):
     c = MondayClient(token="t")
@@ -53,10 +64,10 @@ def test_list_items_vars_cursor_and_state(monkeypatch):
 def test_get_items_values_options_and_empty_list(monkeypatch):
     c = MondayClient(token="t")
     # empty input short-circuit
-    assert c.get_items_values([]) == []
+    assert c.get_items_values([], batch_size=1) == []
     # include_board and column_ids with no JSON parsing
     c.query = lambda q, v: {"items": [{"id": "1", "board": {"id": "b"}, "column_values": [{"id": "x", "value": json.dumps({"a": 1}), "text": "t", "type": "text"}]}]}
-    items = c.get_items_values(["1"], include_board=True, column_ids=["x"], parse_json_values=False)
+    items = c.get_items_values(["1"], include_board=True, column_ids=["x"], parse_json_values=False, batch_size=5)
     # value should remain a JSON string
     assert isinstance(items[0]["column_values"][0]["value"], str)
 
