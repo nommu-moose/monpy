@@ -355,16 +355,12 @@ class MondayClient:
         fields: Optional[List[str] | tuple[str, ...]] = None,
     ) -> Iterator[Dict[str, Any]]:
         """Yield all workspaces page by page (single request per page)."""
-        page = 1
-        while True:
-            rows = self.list_workspaces(limit=page_size, page=(None if page == 1 else page), fields=fields)
-            if not rows:
-                break
-            for w in rows:
-                yield w
-            if len(rows) < page_size:
-                break
-            page += 1
+        from .pagination import iterate_pages
+
+        yield from iterate_pages(
+            lambda pg, sz: self.list_workspaces(limit=sz, page=pg, fields=fields),
+            page_size,
+        )
 
     def get_all_workspaces(
         self,
@@ -373,12 +369,9 @@ class MondayClient:
         fields: Optional[List[str] | tuple[str, ...]] = None,
         max_items: int | None = None,
     ) -> List[Dict[str, Any]]:
-        out: list[dict] = []
-        for w in self.iter_workspaces(page_size=page_size, fields=fields):
-            out.append(w)
-            if max_items is not None and len(out) >= max_items:
-                break
-        return out
+        from .pagination import collect
+
+        return collect(self.iter_workspaces(page_size=page_size, fields=fields), max_items)
 
     # 2. Get a workspace by its ID -------------------------------------
     def get_workspace(
@@ -569,16 +562,14 @@ class MondayClient:
         state: str | list[str] | None = "active",
         fields: list[str] | tuple[str, ...] | None = None,
     ) -> Iterator[dict]:
-        page_num = 1
-        while True:
-            rows = self.list_boards(limit=page_size, workspace_id=workspace_id, state=state, fields=fields, page=(None if page_num == 1 else page_num))
-            if not rows:
-                break
-            for b in rows:
-                yield b
-            if len(rows) < page_size:
-                break
-            page_num += 1
+        from .pagination import iterate_pages
+
+        yield from iterate_pages(
+            lambda pg, sz: self.list_boards(
+                limit=sz, workspace_id=workspace_id, state=state, fields=fields, page=pg
+            ),
+            page_size,
+        )
 
     def get_all_boards(
         self,
@@ -589,12 +580,12 @@ class MondayClient:
         fields: list[str] | tuple[str, ...] | None = None,
         max_items: int | None = None,
     ) -> list[dict]:
-        out: list[dict] = []
-        for b in self.iter_boards(page_size=page_size, workspace_id=workspace_id, state=state, fields=fields):
-            out.append(b)
-            if max_items is not None and len(out) >= max_items:
-                break
-        return out
+        from .pagination import collect
+
+        return collect(
+            self.iter_boards(page_size=page_size, workspace_id=workspace_id, state=state, fields=fields),
+            max_items,
+        )
 
     # 2. Get a single board by ID --------------------------------------
 
@@ -813,16 +804,11 @@ class MondayClient:
         page_size: int = 100,
         fields: list[str] | tuple[str, ...] | None = None,
     ) -> Iterator[dict]:
-        page_num = 1
-        while True:
-            rows = self.list_users(limit=page_size, page=(None if page_num == 1 else page_num), fields=fields)
-            if not rows:
-                break
-            for u in rows:
-                yield u
-            if len(rows) < page_size:
-                break
-            page_num += 1
+        from .pagination import iterate_pages
+
+        yield from iterate_pages(
+            lambda pg, sz: self.list_users(limit=sz, page=pg, fields=fields), page_size
+        )
 
     def get_all_users(
         self,
@@ -831,12 +817,9 @@ class MondayClient:
         fields: list[str] | tuple[str, ...] | None = None,
         max_items: int | None = None,
     ) -> list[dict]:
-        out: list[dict] = []
-        for u in self.iter_users(page_size=page_size, fields=fields):
-            out.append(u)
-            if max_items is not None and len(out) >= max_items:
-                break
-        return out
+        from .pagination import collect
+
+        return collect(self.iter_users(page_size=page_size, fields=fields), max_items)
 
     def list_board_subscribers(self, board_id: str, *, fields: list[str] | tuple[str, ...] | None = None) -> list[dict]:
         field_str = self._fields_to_str(fields, self._DEFAULT_USER_FIELDS)
@@ -1357,15 +1340,15 @@ class MondayClient:
         fields: list[str] | tuple[str, ...] | None = None,
         start_cursor: str | None = None,
     ) -> Iterator[dict]:
-        cursor: Optional[str] = start_cursor
-        while True:
-            items, cursor = self.list_items(board_id, limit=page_size, state=state, fields=fields, cursor=cursor)
-            if not items:
-                break
-            for it in items:
-                yield it
-            if not cursor:
-                break
+        from .pagination import iterate_cursor
+
+        yield from iterate_cursor(
+            lambda cur, sz: self.list_items(
+                board_id, limit=sz, state=state, fields=fields, cursor=cur
+            ),
+            page_size,
+            start_cursor=start_cursor,
+        )
 
     def get_all_items(
         self,
@@ -1376,12 +1359,12 @@ class MondayClient:
         fields: list[str] | tuple[str, ...] | None = None,
         max_items: int | None = None,
     ) -> list[dict]:
-        out: list[dict] = []
-        for it in self.iter_items(board_id, page_size=page_size, state=state, fields=fields):
-            out.append(it)
-            if max_items is not None and len(out) >= max_items:
-                break
-        return out
+        from .pagination import collect
+
+        return collect(
+            self.iter_items(board_id, page_size=page_size, state=state, fields=fields),
+            max_items,
+        )
 
     # -------------------------------------------------------------- 2 —
     # Fetch *values* for a single item by its ID
@@ -1640,20 +1623,19 @@ class MondayClient:
 
         for candidate in list(dict.fromkeys(candidates)):
             q = (
-                "query ($bid:ID!, $col:String!, $val:String!, $lim:Int){ "
-                f"  items_page_by_column_values(board_id:$bid, columns:[{{column_id:$col, column_values:[$val]}}], limit:$lim){{ cursor items {{ {field_str} }} }} "
+                "query ($bid:ID!, $col:String!, $val:String!, $lim:Int, $cur:String){ "
+                f"  items_page_by_column_values(board_id:$bid, columns:[{{column_id:$col, column_values:[$val]}}], limit:$lim, cursor:$cur){{ cursor items {{ {field_str} }} }} "
                 "}"
             )
             cursor: Optional[str] = None
-            first_page = True
             while True:
-                vars_new: Dict[str, Any] = {"bid": board_id, "col": column_id, "val": candidate, "lim": int(page_size)}
-                if not first_page and cursor:
-                    # Some deployments may accept a cursor arg; if not, break after first page
-                    pass
+                vars_new: Dict[str, Any] = {"bid": board_id, "col": column_id, "val": candidate, "lim": int(page_size), "cur": cursor}
                 try:
                     res_new = self.query(q, vars_new)
-                except MondayAPIError:
+                except MondayAPIError as exc:
+                    # If backend rejects the cursor argument explicitly, stop paginating this candidate
+                    if "cursor" in str(exc) and ("Unknown argument" in str(exc) or "cannot query" in str(exc)):
+                        break
                     # Try next candidate or fall back to legacy
                     break
                 page = res_new.get("items_page_by_column_values") or {}
@@ -1663,7 +1645,6 @@ class MondayClient:
                 cursor = page.get("cursor")
                 if not cursor or len(items) < page_size:
                     break
-                first_page = False
 
         # If modern endpoint not available, we've already yielded the first legacy page
         return
@@ -2676,24 +2657,19 @@ class MondayClient:
         list[dict]
             All block dicts in order.
         """
-        page: int = 1
-        out: list[dict] = []
-        while True:
+        from .pagination import collect, iterate_pages
+
+        def _fetch(pg: int | None, sz: int) -> list[dict]:
             doc = self.get_doc(
                 doc_id,
                 by_object_id=by_object_id,
                 include_blocks=True,
-                block_limit=page_size,
-                block_page=page,
+                block_limit=sz,
+                block_page=(1 if pg is None else pg),
             )
-            blocks = doc.get("blocks") or []
-            if not blocks:
-                break
-            out.extend(blocks)
-            if len(blocks) < page_size:  # last page
-                break
-            page += 1
-        return out
+            return list(doc.get("blocks") or [])
+
+        return collect(iterate_pages(_fetch, page_size), None)
 
     def get_doc_text(
             self,

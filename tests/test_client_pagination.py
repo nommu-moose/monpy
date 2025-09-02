@@ -91,3 +91,42 @@ def test_iter_items_cursor(monkeypatch):
     assert got == ["i1", "i2", "i3"]
 
 
+def test_iter_items_by_column_values_cursor(monkeypatch):
+    from monpy.client import MondayClient
+    from monpy import MondayAPIError
+
+    # Simulate items_page_by_column_values with cursor across two pages
+    def q(q: str, v: dict | None = None):
+        # Force modern path by causing legacy endpoint to error out
+        if "items_by_column_values" in q and "items_page_by_column_values" not in q:
+            raise MondayAPIError("legacy not available", errors=[{"message": "cannot query field"}])
+        # Ensure we pass cursor variable after first page
+        cur = (v or {}).get("cur")
+        if cur is None:
+            # first page
+            assert "items_page_by_column_values" in q
+            return {
+                "items_page_by_column_values": {
+                    "cursor": "N2",
+                    "items": [{"id": "x1"}, {"id": "x2"}],
+                }
+            }
+        if cur == "N2":
+            # second page
+            return {
+                "items_page_by_column_values": {
+                    "cursor": None,
+                    "items": [{"id": "x3"}],
+                }
+            }
+        return {"items_page_by_column_values": {"cursor": None, "items": []}}
+
+    c = MondayClient(token="t")
+    c.query = q  # type: ignore[assignment]
+
+    got = [it["id"] for it in c.iter_items_by_column_values(
+        "B", column_id="status", column_value={"index": 1}, page_size=2, fields=("id",)
+    )]
+    assert got == ["x1", "x2", "x3"]
+
+
