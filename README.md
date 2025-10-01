@@ -177,6 +177,31 @@ cp tests/config.example.json tests/config.json
 pytest -q -m live
 ```
 
+Webhooks live tests and mirror helper
+-------------------------------------
+
+To exercise webhook creation and delivery end-to-end:
+
+1) Create `tests/config.json` (ignored by git) from the example and set required keys:
+
+```json
+{
+  "MONDAY_API_TOKEN": "paste-your-token-here",
+  "remote_test_site": "https://utils.today-hub.com"
+}
+```
+
+2) Run the live webhook mirror test, which registers several webhook events to a helper endpoint and waits for the initial challenge payload:
+
+```bash
+pytest -q tests/test_webhook_mirror.py -m live --no-cov
+```
+
+Notes:
+- Some accounts/tokens may restrict webhook creation; the tests will skip gracefully when not permitted.
+- The mirror endpoint exposes both a receive URL and a mirror URL that returns the last captured request. The test polls the mirror with backoff and asserts that the challenge appears.
+- Extend `tests/config.json` with knobs like `MAX_RETRIES`, `BACKOFF`, or `RETRIES` if needed for your environment.
+
 Notes
 -----
 - `tests/config.json` is git-ignored and can store secrets such as `MONDAY_API_TOKEN` (or `token`) for live API tests.

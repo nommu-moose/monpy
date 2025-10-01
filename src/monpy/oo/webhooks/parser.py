@@ -83,11 +83,30 @@ def parse_webhook(payload: Any) -> WebhookEvent:
             previous_value=ev.get("previousValue"),
         )
         obj = cls(**common, **specific)  # type: ignore[arg-type]
+    elif cls.__name__ == "ColumnCreatedEvent":
+        specific = dict(
+            column_id=_as_str(ev.get("columnId")),
+            column_type=(ev.get("columnType") or ev.get("type")),
+            column_title=ev.get("columnTitle"),
+        )
+        obj = cls(**common, **specific)  # type: ignore[arg-type]
     elif cls.__name__ in {"UpdateCreatedEvent", "UpdateChangedEvent", "UpdateDeletedEvent"}:
         specific = dict(update_id=_as_str(ev.get("updateId") or ev.get("id")))
         obj = cls(**common, **specific)  # type: ignore[arg-type]
     elif cls.__name__ == "ItemMovedEvent":
         specific = dict(target_group_id=_as_str(ev.get("toGroupId") or ev.get("targetGroupId")))
+        obj = cls(**common, **specific)  # type: ignore[arg-type]
+    elif cls.__name__ == "SubitemMovedEvent":
+        specific = dict(target_group_id=_as_str(ev.get("toGroupId") or ev.get("targetGroupId")))
+        obj = cls(**common, **specific)  # type: ignore[arg-type]
+    elif cls.__name__ == "SubitemColumnChangeEvent":
+        specific = dict(
+            column_id=_as_str(ev.get("columnId")),
+            column_type=(ev.get("columnType") or ev.get("type")),
+            column_title=ev.get("columnTitle"),
+            value=ev.get("value"),
+            previous_value=ev.get("previousValue"),
+        )
         obj = cls(**common, **specific)  # type: ignore[arg-type]
     else:
         obj = cls(**common)  # type: ignore[arg-type]

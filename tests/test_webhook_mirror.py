@@ -72,12 +72,23 @@ def test_webhook_mirror_challenge_live(client_live, _test_config):
         ws = client_live.create_workspace(name=f"monpy-webhook-{ts}", kind="open", description="pytest webhook mirror")
         bd = sess.create_board(workspace_id=ws["id"], name=f"monpy-webhook-board-{ts}")
 
-        # Register a simple item_created webhook to our helper endpoint
-        try:
-            wh = bd.register_webhook(url=receive_url, event=WebhookEventType.ITEM_CREATED)
-            wh_id = str(wh.get("id")) if isinstance(wh, dict) else None
-        except MondayAPIError:
-            pytest.skip("Token/account does not permit webhook creation on monday.com")
+        # Register several basic webhooks (best-effort) and ensure at least one challenge appears
+        events = [
+            WebhookEventType.ITEM_CREATED,
+            WebhookEventType.ITEM_DELETED,
+            WebhookEventType.ITEM_ARCHIVED,
+            WebhookEventType.ITEM_RESTORED,
+            WebhookEventType.ITEM_MOVED,
+            WebhookEventType.COLUMN_CHANGE,
+        ]
+        for ev in events:
+            try:
+                wh = bd.register_webhook(url=receive_url, event=ev)
+                # Keep the last webhook id for cleanup
+                wh_id = str(wh.get("id")) if isinstance(wh, dict) else wh_id
+            except MondayAPIError:
+                # Continue trying other events; some accounts restrict creation
+                continue
 
         delays = [2, 4, 8, 16, 32]
         got = None

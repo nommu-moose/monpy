@@ -64,6 +64,13 @@ class ColumnChangeEvent(WebhookEvent):
 
 
 @dataclass
+class ColumnCreatedEvent(WebhookEvent):
+    column_id: Optional[str] = None
+    column_type: Optional[str] = None
+    column_title: Optional[str] = None
+
+
+@dataclass
 class UpdateCreatedEvent(WebhookEvent):
     update_id: Optional[str] = None
 
@@ -78,6 +85,48 @@ class UpdateDeletedEvent(WebhookEvent):
     update_id: Optional[str] = None
 
 
+# --- Additional OO event subclasses for parity ----------------------------
+
+
+@dataclass
+class ItemNameChangedEvent(WebhookEvent):
+    pass
+
+
+@dataclass
+class SubitemCreatedEvent(WebhookEvent):
+    pass
+
+
+@dataclass
+class SubitemDeletedEvent(WebhookEvent):
+    pass
+
+
+@dataclass
+class SubitemArchivedEvent(WebhookEvent):
+    pass
+
+
+@dataclass
+class SubitemRestoredEvent(WebhookEvent):
+    pass
+
+
+@dataclass
+class SubitemMovedEvent(WebhookEvent):
+    target_group_id: Optional[str] = None
+
+
+@dataclass
+class SubitemColumnChangeEvent(WebhookEvent):
+    column_id: Optional[str] = None
+    column_type: Optional[str] = None
+    column_title: Optional[str] = None
+    value: Any = None
+    previous_value: Any = None
+
+
 # Mapping from enum to concrete OO event type
 EVENT_CLASS_BY_TYPE: dict[WebhookEventType, type[WebhookEvent]] = {
     WebhookEventType.ITEM_CREATED: ItemCreatedEvent,
@@ -85,10 +134,18 @@ EVENT_CLASS_BY_TYPE: dict[WebhookEventType, type[WebhookEvent]] = {
     WebhookEventType.ITEM_ARCHIVED: ItemArchivedEvent,
     WebhookEventType.ITEM_RESTORED: ItemRestoredEvent,
     WebhookEventType.ITEM_MOVED: ItemMovedEvent,
+    WebhookEventType.ITEM_NAME_CHANGE: ItemNameChangedEvent,
     WebhookEventType.COLUMN_CHANGE: ColumnChangeEvent,
+    WebhookEventType.COLUMN_CREATED: ColumnCreatedEvent,
     WebhookEventType.NEW_UPDATE: UpdateCreatedEvent,
     WebhookEventType.UPDATE_CHANGE: UpdateChangedEvent,
     WebhookEventType.UPDATE_DELETE: UpdateDeletedEvent,
+    WebhookEventType.SUBITEM_CREATED: SubitemCreatedEvent,
+    WebhookEventType.SUBITEM_DELETED: SubitemDeletedEvent,
+    WebhookEventType.SUBITEM_ARCHIVED: SubitemArchivedEvent,
+    WebhookEventType.SUBITEM_RESTORED: SubitemRestoredEvent,
+    WebhookEventType.SUBITEM_MOVED: SubitemMovedEvent,
+    WebhookEventType.SUBITEM_COLUMN_CHANGE: SubitemColumnChangeEvent,
 }
 
 
