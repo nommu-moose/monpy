@@ -250,24 +250,31 @@ class ColumnValues:
     def __getattr__(self, name: str) -> Any:
         # Lazy fetch current value from API for items or subitems
         norm = to_attr(name)
+        # Support reading status index via attribute suffix "_index"
+        is_index_accessor = False
+        base_norm = norm
+        if norm.endswith("_index"):
+            is_index_accessor = True
+            base_norm = norm[:-6]
         try:
-            col = self._columns().by_attr(norm)
+            col = self._columns().by_attr(base_norm)
         except KeyError:
             # Columns cache might be stale (e.g., created just now). Refresh board and retry once.
             try:
                 board = self._item._session.board(self._item.board_id)
                 board.refresh()
-                col = board.columns.by_attr(norm)
+                col = board.columns.by_attr(base_norm)
             except Exception:
                 # try parent-board fallback for SubItems
-                col = self._find_column_for_attr(name)
+                col = self._find_column_for_attr(base_norm)
         client = self._item._session.client
         cv = None
         # check cache
         ttl = getattr(self._item._session, "values_cache_ttl", None)
         if ttl is not None:
             import time
-            ent = self._cache.get(col.id)
+            cache_key = col.id if not is_index_accessor else f"{col.id}::index"
+            ent = self._cache.get(cache_key)
             if ent and (time.time() - ent[0]) <= ttl:
                 return ent[1]
         try:
@@ -281,12 +288,98 @@ class ColumnValues:
             cv = cvs[0] if cvs else None
         if not cv:
             value = None
+            # also compute counterpart for completeness
+            index_value = None
+            label_value = None
         else:
-            value = _decode_value(col.type, cv)
+            # Always compute both label and index so one fetch warms both caches
+            label_value = _decode_value(col.type, cv)
+            # Best-effort extraction of numeric index from raw JSON payload
+            raw = cv.get("value")
+            if isinstance(raw, str) and raw and raw[0] in "{[":
+                try:
+                    raw = json.loads(raw)
+                except ValueError:
+                    pass
+            index_value = None
+            try:
+                if isinstance(raw, dict):
+                    idx = raw.get("index")
+                    index_value = int(idx) if idx is not None else None
+            except Exception:
+                index_value = None
+            value = index_value if is_index_accessor else label_value
         if ttl is not None:
             import time
-            self._cache[col.id] = (time.time(), value)
+            now = time.time()
+            # cache label
+            self._cache[col.id] = (now, label_value if cv else None)
+            # cache index (for status columns)
+            self._cache[f"{col.id}::index"] = (now, index_value if cv else None)
         return value
+
+    # --- cache warming from bulk/row payloads -------------------------
+    def warm_from_row(self, row: Dict[str, Any]) -> None:
+        """Warm the per-item values cache using a full item "row" payload.
+
+        The payload is expected to be compatible with client.get_item_values or
+        client.get_items_values, containing ``column_values`` entries with
+        ``id``, ``value``, ``text`` and ``type``.
+
+        Notes
+        -----
+        - This respects the same decoding as attribute access and precomputes
+          both the human label and status index so either accessor hits cache.
+        - Caching effectiveness depends on Session.values_cache_ttl being set.
+        """
+        cvs = (row or {}).get("column_values") or []
+        if not cvs:
+            return
+        try:
+            board_columns = self._columns()
+        except Exception:
+            return
+        try:
+            import time
+            now = time.time()
+        except Exception:
+            now = 0.0
+        for cv in cvs:
+            try:
+                col_id = cv.get("id")
+                if not isinstance(col_id, str):
+                    continue
+                # Resolve column to obtain its type when available
+                try:
+                    col = board_columns.by_id(col_id)
+                    col_type = col.type
+                except Exception:
+                    # Fall back to type from payload
+                    col_type = cv.get("type")
+
+                label_value = _decode_value(col_type, cv)
+
+                # Compute status index counterpart similar to __getattr__
+                raw = cv.get("value")
+                if isinstance(raw, str) and raw and raw[0] in "{[":
+                    try:
+                        raw = json.loads(raw)
+                    except ValueError:
+                        pass
+                index_value = None
+                try:
+                    if isinstance(raw, dict):
+                        idx = raw.get("index")
+                        index_value = int(idx) if idx is not None else None
+                except Exception:
+                    index_value = None
+
+                # Store both label and index under standard cache keys
+                self._cache[col_id] = (now, label_value)
+                self._cache[f"{col_id}::index"] = (now, index_value)
+            except Exception:
+                # Best-effort warming; ignore malformed entries
+                continue
 
     def __setattr__(self, name: str, value: Any) -> None:
         if name.startswith("_"):

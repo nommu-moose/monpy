@@ -16,10 +16,14 @@ class Item(BaseModel):
     updated_at: str | None = None
     board_id: str | None = None
     _is_subitem: bool = field(default=False, repr=False)
+    _values: ColumnValues | None = field(default=None, repr=False, init=False)
 
     @property
     def values(self) -> ColumnValues:
-        return ColumnValues(self)
+        # Persist wrapper so cache survives multiple property accesses
+        if self._values is None:
+            self._values = ColumnValues(self)
+        return self._values
 
     # --- convenience APIs ---------------------------------------------
     def set_connected_items(self, *, column_attr: str, linked_item_ids: list[str] | list[int]) -> None:
@@ -97,3 +101,24 @@ class Item(BaseModel):
         d._session = self._session
         # The actual operations still pass column context explicitly
         return d
+
+    # --- prefetch values ----------------------------------------------
+    def prefetch_values(self, *, column_ids: Optional[list[str]] = None) -> None:
+        """Fetch all (or selected) column values at once and warm the OO cache.
+
+        This does not change lazy loading semantics; cached results are used
+        when ``Session.values_cache_ttl`` is set and the TTL is not expired.
+        """
+        row = self._session.client.get_item_values(self.id, include_board=True, column_ids=column_ids)
+        # Update basic item metadata from the payload (best-effort)
+        try:
+            self.name = row.get("name", self.name)
+            self.state = row.get("state", self.state)
+            self.updated_at = row.get("updated_at", self.updated_at)
+            b = row.get("board")
+            if b and not self.board_id:
+                self.board_id = str(b.get("id"))
+        except Exception:
+            pass
+        # Warm the values cache on the persistent wrapper
+        self.values.warm_from_row(row)

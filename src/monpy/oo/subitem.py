@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from .base import BaseModel
 from .columns import ColumnValues
@@ -13,11 +13,14 @@ class SubItem(BaseModel):
     state: str | None = None
     updated_at: str | None = None
     board_id: str | None = None
+    _values: ColumnValues | None = None
 
     @property
     def values(self) -> ColumnValues:
         # ColumnValues uses the board’s columns; subitems live on hidden boards
-        return ColumnValues(self)
+        if self._values is None:
+            self._values = ColumnValues(self)
+        return self._values
 
     def _flush_changes(self) -> None:
         col_vals: Dict[str, Any] = self._dirty.get("column_values", {})
@@ -43,5 +46,19 @@ class SubItem(BaseModel):
         b = raw.get("board")
         if b:
             self.board_id = str(b.get("id"))
+
+    # --- prefetch values ----------------------------------------------
+    def prefetch_values(self, *, column_ids: Optional[list[str]] = None) -> None:
+        row = self._session.client.get_subitem_values(self.id, include_board=True, column_ids=column_ids)
+        try:
+            self.name = row.get("name", self.name)
+            self.state = row.get("state", self.state)
+            self.updated_at = row.get("updated_at", self.updated_at)
+            b = row.get("board")
+            if b and not self.board_id:
+                self.board_id = str(b.get("id"))
+        except Exception:
+            pass
+        self.values.warm_from_row(row)
 
 

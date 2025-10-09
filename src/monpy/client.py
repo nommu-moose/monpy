@@ -2252,7 +2252,19 @@ class MondayClient:
                 if not unknown_restore_item:
                     raise
                 # Last resort: bulk restore_items (some deployments expose only the bulk mutation)
-                self.mutation("mutation ($ids: [ID!]!){ restore_items(item_ids:$ids){ id } }", {"ids": [item_id]})
+                try:
+                    self.mutation("mutation ($ids: [ID!]!){ restore_items(item_ids:$ids){ id } }", {"ids": [item_id]})
+                    return
+                except MondayAPIError as exc3:
+                    msgs3 = MondayClient._error_messages_lower(getattr(exc3, "errors", []))
+                    unknown_restore_items = any(
+                        ("cannot query field \"restore_items\"" in m) or ("unknown field" in m and "restore_items" in m)
+                        for m in msgs3
+                    )
+                    if unknown_restore_items:
+                        # Treat as gracefully unsupported; no-op
+                        return
+                    raise
 
     def duplicate_item(
         self,

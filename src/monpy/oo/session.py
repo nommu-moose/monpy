@@ -199,6 +199,58 @@ class Session:
         else:
             self.client.update_item_values(board_id, item_id, column_values=column_values)
 
+    # --- bulk prefetch helpers ----------------------------------------
+    def prefetch_items_values(
+        self,
+        item_ids: List[str],
+        *,
+        column_ids: Optional[List[str]] = None,
+        include_board: bool = True,
+        batch_size: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """Fetch values for multiple items and warm their OO caches.
+
+        Returns the raw rows for convenience. Existing Item/SubItem wrappers in
+        the identity map will have their ``values`` caches warmed if present or
+        created on-demand.
+        """
+        if not item_ids:
+            return []
+        rows = self.client.get_items_values(
+            item_ids,
+            include_board=include_board,
+            column_ids=column_ids,
+            batch_size=batch_size,
+        )
+        # Warm caches for objects tracked by the session
+        for row in rows:
+            try:
+                iid = str(row.get("id"))
+                if not iid:
+                    continue
+                obj = self._identity.get(("item", iid))
+                if obj is None:
+                    # Lazily register a lightweight Item shell so callers can immediately use OO API
+                    from .item import Item
+                    b = row.get("board") or {}
+                    obj = Item(
+                        id=iid,
+                        name=row.get("name"),
+                        state=row.get("state"),
+                        updated_at=row.get("updated_at"),
+                        board_id=str(b.get("id")) if b else None,
+                    )
+                    obj._session = self
+                    self._identity[("item", iid)] = obj
+                # Warm the value cache
+                try:
+                    obj.values.warm_from_row(row)
+                except Exception:
+                    pass
+            except Exception:
+                continue
+        return rows
+
 
 class _UpdateItemValuesOp:
     def __init__(self, *, session: Session, board_id: str, item_id: str, column_values: Dict[str, Any]) -> None:

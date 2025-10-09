@@ -185,6 +185,11 @@ class Board(BaseModel):
         col_id = self.columns.id_for_attr(column_attr)
         return self._session.client.items_by_column_values(self.id, column_id=col_id, column_value=value, limit=limit)
 
+    # --- prefetch convenience -----------------------------------------
+    def prefetch_items_values(self, item_ids: list[str], *, column_ids: Optional[list[str]] = None, batch_size: int = 100) -> list[dict]:
+        """Prefetch values for many items on this board and warm OO caches."""
+        return self._session.prefetch_items_values(item_ids, column_ids=column_ids, include_board=True, batch_size=batch_size)
+
     # --- webhooks ------------------------------------------------------
     def register_webhook(self, *, url: str, event: str | "WebhookEventType", config: Optional[dict] = None) -> dict:
         """Create a webhook for this board and return the created object (id by default)."""
