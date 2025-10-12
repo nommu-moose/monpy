@@ -33,7 +33,7 @@ def _list_items_for_board(client: MondayClient, board_id: str, *, page_size: int
     return client.get_all_items(board_id, page_size=page_size, state="active", fields=["id", "name"])  # type: ignore[list-item]
 
 
-def _batched_list_items_for_boards(client: MondayClient, board_ids: List[str], *, page_size: int = 200, batch_size: int = 20) -> Dict[str, List[Dict[str, Any]]}:
+def _batched_list_items_for_boards(client: MondayClient, board_ids: List[str], *, page_size: int = 200, batch_size: int = 20) -> Dict[str, List[Dict[str, Any]]]:
 
     result: Dict[str, List[Dict[str, Any]]] = {bid: [] for bid in board_ids}
     # Use existing client.list_items pagination per board, but interleave boards in batches
