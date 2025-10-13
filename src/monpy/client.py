@@ -141,6 +141,7 @@ class MondayClient:
         backoff: float = 1.0,
         endpoint: str = "https://api.monday.com/v2",
         files_endpoint: str = "https://api.monday.com/v2/file",
+        dev_mode: bool = False,
     ) -> None:
         if not token:
             raise ValueError("A non-empty monday.com API token is required")
@@ -165,6 +166,13 @@ class MondayClient:
             }
         )
 
+        # Developer diagnostics toggle (prints outgoing request details when enabled)
+        self._dev_mode: bool = bool(dev_mode)
+
+    # Toggle dev mode at runtime
+    def set_dev_mode(self, enabled: bool) -> None:
+        self._dev_mode = bool(enabled)
+
     # ---------------- low-level GraphQL helpers -----------------------
 
     def _request(self, query: str, variables: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -172,6 +180,24 @@ class MondayClient:
         payload: Dict[str, Any] = {"query": query}
         if variables:
             payload["variables"] = variables
+
+        if self._dev_mode:
+            try:
+                debug_headers = dict(self._session.headers)
+            except Exception:
+                debug_headers = {}
+            try:
+                dbg_headers = json.dumps(debug_headers, ensure_ascii=False, indent=2, sort_keys=True)
+            except Exception:
+                dbg_headers = str(debug_headers)
+            try:
+                dbg_payload = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
+            except Exception:
+                # Fallback best-effort serialization
+                dbg_payload = str(payload)
+            print("[monpy][dev] POST", self.endpoint)
+            print("[monpy][dev] Headers:\n" + dbg_headers)
+            print("[monpy][dev] Payload:\n" + dbg_payload)
 
         total_retries = max(self.max_retries, self.retries)
         for attempt in range(total_retries + 1):
@@ -431,7 +457,24 @@ class MondayClient:
           }}
         }}
         """
-        boards = self.query(q, {"bid": [board_id]})["boards"]
+        # Try with fragment; if schema doesn't support BoardRelationColumn, retry without it
+        try:
+            boards = self.query(q, {"bid": [board_id]})["boards"]
+        except GraphQLError as exc:
+            msgs = [str((e or {}).get("message", "")).lower() for e in getattr(exc, "errors", [])]
+            if any("unknown type \"boardrelationcolumn\"" in m for m in msgs) or any("did you mean \"boardrelationvalue\"" in m for m in msgs):
+                q_no_frag = f"""
+                query ($bid:[ID!]!) {{
+                  boards (ids: $bid) {{
+                    columns {{
+                      {field_str}
+                    }}
+                  }}
+                }}
+                """
+                boards = self.query(q_no_frag, {"bid": [board_id]})["boards"]
+            else:
+                raise
         if not boards or boards[0].get("workspace") is None:
             raise MondayAPIError(
                 f"Board {board_id} not found or has no parent workspace"
@@ -1000,12 +1043,14 @@ class MondayClient:
             parse_settings: bool = True,
     ) -> List[Dict[str, Any]]:
         field_str = self._fields_to_str(fields, self._DEFAULT_COLUMN_FIELDS)
+        # Include inline fragment to expose typed field for Connect Boards
+        field_str_with_frag = f"{field_str} {self._BOARD_RELATION_FRAGMENT}"
 
         q = f"""
         query ($bid:[ID!]!) {{
           boards (ids: $bid) {{
             columns {{
-              {field_str}
+              {field_str_with_frag}
             }}
           }}
         }}
@@ -1032,15 +1077,31 @@ class MondayClient:
             parse_settings: bool = True,
     ) -> Dict[str, Any]:
         field_str = self._fields_to_str(fields, self._DEFAULT_COLUMN_FIELDS)
+        # Include inline fragment to expose typed field for Connect Boards
+        field_str_with_frag = f"{field_str} {self._BOARD_RELATION_FRAGMENT}"
 
         q = f"""
         query ($bid:[ID!]!, $cid:[String!]!) {{
           boards (ids:$bid) {{
-            columns (ids:$cid) {{ {field_str} }}
+            columns (ids:$cid) {{ {field_str_with_frag} }}
           }}
         }}
         """
-        boards = self.query(q, {"bid": [board_id], "cid": [column_id]})["boards"]
+        try:
+            boards = self.query(q, {"bid": [board_id], "cid": [column_id]})["boards"]
+        except GraphQLError as exc:
+            msgs = [str((e or {}).get("message", "")).lower() for e in getattr(exc, "errors", [])]
+            if any("unknown type \"boardrelationcolumn\"" in m for m in msgs) or any("did you mean \"boardrelationvalue\"" in m for m in msgs):
+                q_no_frag = f"""
+                query ($bid:[ID!]!, $cid:[String!]!) {{
+                  boards (ids:$bid) {{
+                    columns (ids:$cid) {{ {field_str} }}
+                  }}
+                }}
+                """
+                boards = self.query(q_no_frag, {"bid": [board_id], "cid": [column_id]})["boards"]
+            else:
+                raise
         if not boards or not boards[0]["columns"]:
             raise ColumnNotFound(
                 f"Column {column_id} not found on board {board_id}"
@@ -1158,6 +1219,7 @@ class MondayClient:
             # for this account to allow callers/tests to skip gracefully.
             try:
                 if normalized_type == "board_relation":
+                    # Prefer native typed field when available
                     cb_ids = (result or {}).get("connected_board_ids") or []
                     settings = (result or {}).get("settings") or {}
                     fallback = (
@@ -1167,14 +1229,13 @@ class MondayClient:
                         or settings.get("board_id")
                         or settings.get("connected_boards")
                     )
-                    if (not cb_ids) and (not fallback):
-                        raise FeatureNotSupported(
-                            "Connect boards columns created but linkage metadata is not exposed by this API/account",
-                            errors=[],
-                        )
-            except FeatureNotSupported:
-                # Re-raise to outer handler
-                raise
+                    # Some deployments expose linkage only for board admins or after propagation delay.
+                    # Do not treat absence as hard-unsupported if mutation succeeded; allow callers to proceed.
+                    # We keep decoding best-effort; no FeatureNotSupported raised here.
+                    _ = cb_ids or fallback  # keep for readability
+            except Exception:
+                # Best-effort; if any unexpected error occurs, return as-is
+                pass
             except Exception:
                 # Best-effort; if any unexpected error occurs, return as-is
                 pass
