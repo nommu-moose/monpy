@@ -95,15 +95,11 @@ def main() -> int:
     tree = build_workspace_board_item_tree(session)
 
     for ws in tree:
-        wname = ws.get("workspace_name") or ""
-        wid = ws.get("workspace_id") or ""
-        print(f"Workspace: {wname} ({wid})")
-        boards = ws.get("boards") or []
+        print(f"Workspace: {ws.name or ''} ({ws.id})")
+        boards = getattr(ws, "boards", [])
         for b in boards:
-            bname = b.get("board_name") or ""
-            bid = b.get("board_id") or ""
-            items = b.get("items") or []
-            print(f"  - Board: {bname} ({bid}) items={len(items)}")
+            items = getattr(b, "items", [])
+            print(f"  - Board: {b.name or ''} ({b.id}) items={len(items)}")
 
     return 0
 
