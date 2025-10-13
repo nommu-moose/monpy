@@ -146,11 +146,7 @@ def setup_board():
     board_id
     fields: [{"field_key": str, "field_title": str, "field_type": pkg oo enum, <other info if needed per-field>:}, ...]
 
-    should take the list of fields and create them on the board
-    for connect boards, set a while loop with a time sleep between each, log to console each time instructions for user
-     (this is because connect boards cannot be set up outside the GUI)
-     each loop, check to see if the column exists yet, and double check config of the column is correct
-     when correct, continue to the next fields
+    takes the list of fields and create them on the board with correct configuration
 
     return a list of dicts for each key in the dict of fields passed to it
     the dicts should have the same field_key: key with field_id: generated on monday.com too, for future reference

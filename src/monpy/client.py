@@ -106,6 +106,8 @@ class MondayClient:
         "id",
         "title",
         "type",
+        # Prefer modern field; keep legacy for backward compatibility
+        "settings",
         "settings_str",
     )
     _DEFAULT_ITEM_FIELDS: tuple[str, ...] = ("id", "name", "state", "updated_at")
@@ -1043,15 +1045,11 @@ class MondayClient:
             parse_settings: bool = True,
     ) -> List[Dict[str, Any]]:
         field_str = self._fields_to_str(fields, self._DEFAULT_COLUMN_FIELDS)
-        # Include inline fragment to expose typed field for Connect Boards
-        field_str_with_frag = f"{field_str} {self._BOARD_RELATION_FRAGMENT}"
 
         q = f"""
         query ($bid:[ID!]!) {{
           boards (ids: $bid) {{
-            columns {{
-              {field_str_with_frag}
-            }}
+            columns {{ {field_str} }}
           }}
         }}
         """
@@ -1077,31 +1075,15 @@ class MondayClient:
             parse_settings: bool = True,
     ) -> Dict[str, Any]:
         field_str = self._fields_to_str(fields, self._DEFAULT_COLUMN_FIELDS)
-        # Include inline fragment to expose typed field for Connect Boards
-        field_str_with_frag = f"{field_str} {self._BOARD_RELATION_FRAGMENT}"
 
         q = f"""
         query ($bid:[ID!]!, $cid:[String!]!) {{
           boards (ids:$bid) {{
-            columns (ids:$cid) {{ {field_str_with_frag} }}
+            columns (ids:$cid) {{ {field_str} }}
           }}
         }}
         """
-        try:
-            boards = self.query(q, {"bid": [board_id], "cid": [column_id]})["boards"]
-        except GraphQLError as exc:
-            msgs = [str((e or {}).get("message", "")).lower() for e in getattr(exc, "errors", [])]
-            if any("unknown type \"boardrelationcolumn\"" in m for m in msgs) or any("did you mean \"boardrelationvalue\"" in m for m in msgs):
-                q_no_frag = f"""
-                query ($bid:[ID!]!, $cid:[String!]!) {{
-                  boards (ids:$bid) {{
-                    columns (ids:$cid) {{ {field_str} }}
-                  }}
-                }}
-                """
-                boards = self.query(q_no_frag, {"bid": [board_id], "cid": [column_id]})["boards"]
-            else:
-                raise
+        boards = self.query(q, {"bid": [board_id], "cid": [column_id]})["boards"]
         if not boards or not boards[0]["columns"]:
             raise ColumnNotFound(
                 f"Column {column_id} not found on board {board_id}"
@@ -1198,16 +1180,20 @@ class MondayClient:
             "bid": board_id,
             "title": title,
             "type": normalized_type,
-            "defaults": json.dumps(defaults_payload),
+            # Pass JSON object natively; avoid stringifying which can be ignored by API
+            "defaults": (defaults_payload if defaults_payload else None),
             "desc": description,
         }
         try:
             created = self.mutation(m, vars)["create_column"]
             # If the mutation result already includes enough fields (e.g. tests mock
-            # settings_str), avoid an extra network call.
+            # settings/settings_str), avoid an extra network call.
             created_keys = set((created or {}).keys())
             requested = set(fields) if isinstance(fields, (list, tuple)) else set()
-            if (not requested and "settings_str" in created_keys) or (requested and requested.issubset(created_keys)):
+            if (
+                (not requested and ("settings" in created_keys or "settings_str" in created_keys))
+                or (requested and requested.issubset(created_keys))
+            ):
                 self._augment_column_meta(created)
                 result = created
             else:
@@ -1308,13 +1294,14 @@ class MondayClient:
             )
 
     # ------------------------------------------------------------------
-    # Private helper – parse settings_str for Connect / Mirror columns
+    # Private helper – parse column settings for Connect / Mirror columns
     # ------------------------------------------------------------------
 
     @staticmethod
     def _augment_column_meta(col: Dict[str, Any]) -> None:
         """
-        Parse ``settings_str`` and attach convenience keys
+        Prefer modern ``settings`` object when present, fall back to
+        ``settings_str`` (legacy) and attach convenience keys
         (``connected_board_ids``, ``referenced_column_id``, ``settings``).
 
         Mirror columns
@@ -1325,14 +1312,26 @@ class MondayClient:
         mirror you must either adjust it manually in the Monday UI or delete and
         recreate the column with the desired defaults.
         """
-        raw = col.get("settings_str")
-        if raw:
+        # Prefer already-parsed settings if provided by the API (2025-10+)
+        settings_obj = col.get("settings")
+        settings: Dict[str, Any]
+        if isinstance(settings_obj, dict):
+            settings = settings_obj
+        elif isinstance(settings_obj, str):
             try:
-                settings = json.loads(raw)
+                settings = json.loads(settings_obj)
             except ValueError:
                 settings = {}
         else:
-            settings = {}
+            # Legacy: decode settings_str JSON string
+            raw = col.get("settings_str")
+            if raw:
+                try:
+                    settings = json.loads(raw)
+                except ValueError:
+                    settings = {}
+            else:
+                settings = {}
 
         # Always expose the parsed settings blob, even if empty
         col["settings"] = settings
@@ -1630,7 +1629,7 @@ class MondayClient:
                     normalized_values.append(str(column_value["index"]))
                     # Also attempt to resolve the human label for Status columns
                     try:
-                        col_meta = self.get_column(board_id, column_id, fields=("id", "type", "settings_str"))
+                        col_meta = self.get_column(board_id, column_id, fields=("id", "type", "settings", "settings_str"))
                         settings = col_meta.get("settings", {})
                         labels = settings.get("labels") or settings.get("labels_colors", {}).get("labels")
                         if isinstance(labels, dict):
