@@ -1,7 +1,7 @@
 import types
 import pytest
 
-from monpy import MondayClient, MondayAPIError
+from monpy import MondayClient, MondayAPIError, HTTPError
 
 
 def test_upload_file_http_error(monkeypatch):
@@ -9,7 +9,7 @@ def test_upload_file_http_error(monkeypatch):
     def r_post(url, headers=None, data=None, files=None, timeout=None):
         return types.SimpleNamespace(status_code=500, text="boom", json=lambda: {})
     monkeypatch.setattr("requests.post", r_post)
-    with pytest.raises(MondayAPIError):
+    with pytest.raises(HTTPError):
         c.upload_file_to_column("i", column_id="c", file_obj=types.SimpleNamespace(name="f"))
 
 
@@ -28,7 +28,7 @@ def test_download_file_http_error(monkeypatch):
     def r_get(url, timeout=None, headers=None):
         return types.SimpleNamespace(status_code=404, text="nope")
     monkeypatch.setattr("requests.get", r_get)
-    with pytest.raises(MondayAPIError):
+    with pytest.raises(HTTPError):
         c.download_files_from_column("i", "c")
 
 

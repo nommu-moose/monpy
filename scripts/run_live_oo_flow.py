@@ -220,13 +220,33 @@ def run_flow(opts: LiveOptions) -> int:
         print("Item A:", item.id)
 
         step_pause(opts.step, "Registering webhook on Board A (OO)")
+        # Build helper receive URL from config (tests/config.json -> remote_test_site)
+        cfg = read_tests_config()
+        base = (cfg.get("remote_test_site") or cfg.get("REMOTE_TEST_SITE"))
+        receive_url = None
+        if base:
+            base = base.strip()
+            if not base.startswith("http://") and not base.startswith("https://"):
+                if any(local in base for local in ("127.0.0.1", "localhost", "[::1]")):
+                    base = f"http://{base}"
+                else:
+                    base = f"https://{base}"
+            if base.endswith("/"):
+                base = base[:-1]
+            import uuid as _uuid
+            path_key = f"dev-util-test-{_uuid.uuid4().hex[:12]}"
+            receive_url = f"{base}/hooks/{path_key}/"
+
         wh_id = None
-        try:
-            wh = bd1.register_webhook(url="https://eo4xstnn32il7em.m.pipedream.net", event=WebhookEventType.ITEM_CREATED)
-            wh_id = (wh.get("id") if isinstance(wh, dict) else None)
-            print("Webhook created:", wh_id or wh)
-        except MondayAPIError as e:
-            print("Webhook creation not permitted or unsupported (skipping):", e)
+        if receive_url:
+            try:
+                wh = bd1.register_webhook(url=receive_url, event=WebhookEventType.ITEM_CREATED)
+                wh_id = (wh.get("id") if isinstance(wh, dict) else None)
+                print("Webhook created:", wh_id or wh)
+            except MondayAPIError as e:
+                print("Webhook creation not permitted or unsupported (skipping):", e)
+        else:
+            print("remote_test_site missing in tests/config.json; skipping webhook registration")
 
         step_pause(opts.step, "Reading initial values via OO")
         print("text:", item.values.text)

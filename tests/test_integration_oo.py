@@ -6,6 +6,7 @@ import pytest
 
 from monpy import Session
 from monpy.oo.enums import WebhookEventType
+import uuid
 from monpy.exceptions import MondayAPIError, FeatureNotSupported
 from monpy.oo.doc import Doc
 from monpy.oo.file_asset import (
@@ -16,7 +17,7 @@ from monpy.oo.file_asset import (
 
 
 @pytest.mark.live
-def test_full_live_flow_oo(client_live):
+def test_full_live_flow_oo(client_live, _test_config):
     ts = str(int(time.time()))
 
     # --- OO Session over the real client ---
@@ -42,13 +43,28 @@ def test_full_live_flow_oo(client_live):
         bd2 = sess.board(b2["id"])  # secondary board (for relations)
 
         # --- webhooks (OO wrappers) ---
+        base = (_test_config.get("remote_test_site") or _test_config.get("REMOTE_TEST_SITE"))
+        receive_url = None
+        if base:
+            base = base.strip()
+            if not base.startswith("http://") and not base.startswith("https://"):
+                if any(local in base for local in ("127.0.0.1", "localhost", "[::1]")):
+                    base = f"http://{base}"
+                else:
+                    base = f"https://{base}"
+            if base.endswith("/"):
+                base = base[:-1]
+            path_key = f"pytest-mirror-{uuid.uuid4().hex[:10]}"
+            receive_url = f"{base}/hooks/{path_key}/"
+
         wh_id = None
-        try:
-            wh = bd1.register_webhook(url="https://eo4xstnn32il7em.m.pipedream.net", event=WebhookEventType.ITEM_CREATED)
-            wh_id = str(wh.get("id")) if isinstance(wh, dict) else None
-        except MondayAPIError:
-            # Not all tokens/accounts permit webhook creation; skip silently
-            wh_id = None
+        if receive_url:
+            try:
+                wh = bd1.register_webhook(url=receive_url, event=WebhookEventType.ITEM_CREATED)
+                wh_id = str(wh.get("id")) if isinstance(wh, dict) else None
+            except MondayAPIError:
+                # Not all tokens/accounts permit webhook creation; skip silently
+                wh_id = None
         g1 = bd1.create_group(title="grp1")
         g2 = bd2.create_group(title="grp2")
 

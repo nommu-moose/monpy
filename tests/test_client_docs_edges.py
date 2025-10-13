@@ -1,6 +1,6 @@
 import json
 
-from monpy import MondayClient, MondayAPIError
+from monpy import MondayClient, MondayAPIError, DocNotFound
 
 
 def test_get_doc_not_found_raises():
@@ -8,10 +8,10 @@ def test_get_doc_not_found_raises():
     c.query = lambda q, v: {"docs": []}
     try:
         c.get_doc("nope")
-    except MondayAPIError as e:
+    except DocNotFound as e:
         assert "not found" in str(e)
     else:
-        assert False, "expected MondayAPIError"
+        assert False, "expected DocNotFound"
 
 
 def test_blocks_to_plaintext_fallback_string():

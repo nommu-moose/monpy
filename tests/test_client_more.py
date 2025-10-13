@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from monpy import MondayClient, MondayAPIError
+from monpy import MondayClient, MondayAPIError, SubItemNotFound, ParentItemNotFound
 
 
 def test_augment_column_meta_variants():
@@ -97,7 +97,7 @@ def test_subitems_helpers_and_cache(monkeypatch):
     c = MondayClient(token="t")
     # list_subitems not found
     c.query = lambda q, v: {"items": []}
-    with pytest.raises(MondayAPIError):
+    with pytest.raises(ParentItemNotFound):
         c.list_subitems("p")
 
     # get_subitem_values include blocks

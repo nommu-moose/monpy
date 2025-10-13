@@ -38,7 +38,23 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Sequence, Mapping, Iterator
 from importlib.metadata import PackageNotFoundError, version as pkg_version
-from .exceptions import MondayAPIError, FeatureNotSupported
+from .exceptions import (
+    MondayAPIError,
+    FeatureNotSupported,
+    WorkspaceNotFound,
+    BoardNotFound,
+    ColumnNotFound,
+    ItemNotFound,
+    ParentItemNotFound,
+    SubItemNotFound,
+    DocNotFound,
+    BoardResolutionError,
+    EmptyUpdateError,
+    NetworkError,
+    RateLimitError,
+    HTTPError,
+    GraphQLError,
+)
 import requests
 import logging
 
@@ -168,7 +184,7 @@ class MondayClient:
                 if attempt < self.max_retries:
                     time.sleep(self.backoff * 2**attempt)
                     continue
-                raise MondayAPIError("Network error") from exc
+                raise NetworkError("Network error") from exc
 
             # Gracefully handle 429 “too many requests”
             if response.status_code == 429 and attempt < self.max_retries:
@@ -187,9 +203,7 @@ class MondayClient:
 
             # Anything other than HTTP 200 is fatal
             if response.status_code != 200:
-                raise MondayAPIError(
-                    f"HTTP {response.status_code}: {response.text}"
-                )
+                raise HTTPError(f"HTTP {response.status_code}: {response.text}")
 
             data = response.json()
 
@@ -206,13 +220,13 @@ class MondayClient:
                 if retry:
                     time.sleep(self.backoff * 2**attempt)
                     continue
-                raise MondayAPIError(
+                raise GraphQLError(
                     f"GraphQL errors returned for: \n{variables}\n", errors=data["errors"]
                 )
 
             return data["data"]
 
-        raise MondayAPIError("Unrecoverable rate-limit / network failure")
+        raise RateLimitError("Unrecoverable rate-limit / network failure")
 
     # Public wrappers – handy for debugging
     def query(self, query: str, variables: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -391,7 +405,7 @@ class MondayClient:
         """
         result = self.query(q, {"id": [workspace_id]})["workspaces"]
         if not result:
-            raise MondayAPIError(f"Workspace with ID {workspace_id} not found")
+            raise WorkspaceNotFound(f"Workspace with ID {workspace_id} not found")
         return result[0]
 
     # 3. Resolve workspace metadata *given a board ID* -----------------
@@ -606,7 +620,7 @@ class MondayClient:
         """
         result = self.query(q, {"id": [board_id]})["boards"]
         if not result:
-            raise MondayAPIError(f"Board with ID {board_id} not found")
+            raise BoardNotFound(f"Board with ID {board_id} not found")
         return result[0]
 
     # 3. Create a board -------------------------------------------------
@@ -832,7 +846,7 @@ class MondayClient:
         )
         boards = self.query(q, {"id": [board_id]})["boards"]
         if not boards:
-            raise MondayAPIError(f"Board {board_id} not found")
+            raise BoardNotFound(f"Board {board_id} not found")
         return boards[0].get("subscribers", [])
 
     def list_board_owners(self, board_id: str, *, fields: list[str] | tuple[str, ...] | None = None) -> list[dict]:
@@ -847,7 +861,7 @@ class MondayClient:
         )
         boards = self.query(q, {"id": [board_id]})["boards"]
         if not boards:
-            raise MondayAPIError(f"Board {board_id} not found")
+            raise BoardNotFound(f"Board {board_id} not found")
         return boards[0].get("owners", [])
 
     def list_board_members_by_role(self, board_id: str, *, fields: list[str] | tuple[str, ...] | None = None) -> dict:
@@ -863,7 +877,7 @@ class MondayClient:
         )
         boards = self.query(q, {"id": [board_id]})["boards"]
         if not boards:
-            raise MondayAPIError(f"Board {board_id} not found")
+            raise BoardNotFound(f"Board {board_id} not found")
         b = boards[0]
         return {"owners": b.get("owners", []), "subscribers": b.get("subscribers", [])}
 
@@ -998,7 +1012,7 @@ class MondayClient:
         """
         boards = self.query(q, {"bid": [board_id]})["boards"]
         if not boards:
-            raise MondayAPIError(f"Board with ID {board_id} not found")
+            raise BoardNotFound(f"Board with ID {board_id} not found")
         cols = boards[0]["columns"]
 
         if parse_settings:
@@ -1028,7 +1042,7 @@ class MondayClient:
         """
         boards = self.query(q, {"bid": [board_id], "cid": [column_id]})["boards"]
         if not boards or not boards[0]["columns"]:
-            raise MondayAPIError(
+            raise ColumnNotFound(
                 f"Column {column_id} not found on board {board_id}"
             )
         col = boards[0]["columns"][0]
@@ -1354,7 +1368,7 @@ class MondayClient:
         }}"""
         boards = self.query(q, vars)["boards"]
         if not boards:
-            raise MondayAPIError(f"Board {board_id} not found")
+            raise BoardNotFound(f"Board {board_id} not found")
         page_data = boards[0]["items_page"]
         return page_data["items"], page_data.get("cursor")
 
@@ -1438,7 +1452,7 @@ class MondayClient:
 
         data = self.query(q, vars)["items"]
         if not data:
-            raise MondayAPIError(f"Item {item_id} not found")
+            raise ItemNotFound(f"Item {item_id} not found")
 
         item = data[0]
 
@@ -2060,7 +2074,7 @@ class MondayClient:
             column_values: dict[str, object],
     ) -> None:
         if not column_values:
-            raise ValueError("column_values must contain at least one entry")
+            raise EmptyUpdateError("column_values must contain at least one entry")
 
         # --- NEW line ---------------------------------------------------
         self._coerce_text_values(board_id, column_values)
@@ -2214,8 +2228,8 @@ class MondayClient:
             board_id = None
 
         if not board_id:
-            # If board id couldn't be determined, surface the original capability error
-            raise MondayAPIError("Unable to determine board_id for item rename fallback") from exc
+            # If board id couldn't be determined, surface as a resolution error
+            raise BoardResolutionError("Unable to determine board_id for item rename fallback") from exc
 
         # Use the helper that always includes board_id
         self.update_item_single_column(board_id, item_id, column_id="name", value=name)
@@ -2363,7 +2377,7 @@ class MondayClient:
         )
         boards = self.query(q, {"id": [board_id]})["boards"]
         if not boards:
-            raise MondayAPIError(f"Board {board_id} not found")
+            raise BoardNotFound(f"Board {board_id} not found")
         return boards[0].get("groups", [])
 
     def create_group(self, board_id: str, *, title: str, fields: list[str] | tuple[str, ...] | None = None) -> dict:
@@ -2450,7 +2464,7 @@ class MondayClient:
         """
         items = self.query(q, {"pid": [parent_item_id]})["items"]
         if not items:
-            raise MondayAPIError(f"Parent item {parent_item_id} not found")
+            raise ParentItemNotFound(f"Parent item {parent_item_id} not found")
         return items[0]["subitems"]
 
     # -------------------------------------------------------------- 2 —
@@ -2498,7 +2512,7 @@ class MondayClient:
         """
         items = self.query(q, {"sid": [subitem_id]})["items"]
         if not items:
-            raise MondayAPIError(f"Sub-item with ID {subitem_id} not found")
+            raise SubItemNotFound(f"Sub-item with ID {subitem_id} not found")
         return items[0]
 
     # -------------------------------------------------------------- 3 —
@@ -2562,7 +2576,7 @@ class MondayClient:
         helper will perform one extra lookup to resolve it automatically.
         """
         if not column_values:
-            raise ValueError("column_values must contain at least one entry")
+            raise EmptyUpdateError("column_values must contain at least one entry")
 
         if board_id is None:
             board_id = self._get_board_id_for_subitem(subitem_id)
@@ -2643,7 +2657,7 @@ class MondayClient:
         """
         items = self.query(q, {"sid": [subitem_id]})["items"]
         if not items or not items[0].get("board"):
-            raise MondayAPIError(f"Cannot resolve board for sub-item {subitem_id}")
+            raise BoardResolutionError(f"Cannot resolve board for sub-item {subitem_id}")
 
         board_id = str(items[0]["board"]["id"])
         cache[subitem_id] = board_id
@@ -2726,7 +2740,7 @@ class MondayClient:
 
         docs = self.query(q, vars_)["docs"]
         if not docs:
-            raise MondayAPIError(f"Doc {doc_or_object_id} not found via {arg_name}")
+            raise DocNotFound(f"Doc {doc_or_object_id} not found via {arg_name}")
         return docs[0]
 
     def get_all_blocks(
@@ -3051,11 +3065,11 @@ class MondayClient:
             timeout=30,
         )
         if resp.status_code != 200:
-            raise MondayAPIError(f"HTTP {resp.status_code}: {resp.text}")
+            raise HTTPError(f"HTTP {resp.status_code}: {resp.text}")
 
         payload = resp.json()
         if "errors" in payload:
-            raise MondayAPIError("GraphQL errors returned", errors=payload["errors"])
+            raise GraphQLError("GraphQL errors returned", errors=payload["errors"])
 
         return payload["data"]["add_file_to_column"]
 
@@ -3078,7 +3092,7 @@ class MondayClient:
             resp = requests.get(url, timeout=30,
                                 headers={"User-Agent": self._session.headers["User-Agent"]})
             if resp.status_code != 200:
-                raise MondayAPIError(f"HTTP {resp.status_code}: {resp.text}")
+                raise HTTPError(f"HTTP {resp.status_code}: {resp.text}")
             out.append(resp.content)
         return out
 

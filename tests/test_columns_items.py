@@ -3,7 +3,7 @@ import types
 
 import pytest
 
-from monpy import MondayClient, MondayAPIError
+from monpy import MondayClient, MondayAPIError, EmptyUpdateError
 
 
 def _fake_ok(data):
@@ -73,7 +73,7 @@ def test_update_item_values_coerces_text_and_raises_on_empty(monkeypatch):
         captured["vars"] = vars
         return {"change_multiple_column_values": {"id": "1"}}
     c.mutation = mutation
-    with pytest.raises(ValueError):
+    with pytest.raises(EmptyUpdateError):
         c.update_item_values("b", "i", column_values={})
     c.update_item_values("b", "i", column_values={"t1": 123, "x": 5})
     sent = json.loads(captured["vars"]["vals"])

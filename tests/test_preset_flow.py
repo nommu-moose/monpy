@@ -6,6 +6,7 @@ import pytest
 
 from monpy import Session
 from monpy.exceptions import MondayAPIError, FeatureNotSupported
+import uuid
 from monpy.oo.doc import Doc
 from monpy.oo.file_asset import (
     upload_to_file_column,
@@ -105,8 +106,22 @@ def test_preset_oo(client_live, _test_config):
     target_b_item = bd2.create_item(group_id=group_primary_id_b, item_name="preset-target")
 
     # Best-effort webhook (may not be permitted)
+    base = (_test_config.get("remote_test_site") or _test_config.get("REMOTE_TEST_SITE"))
+    receive_url = None
+    if base:
+        base = base.strip()
+        if not base.startswith("http://") and not base.startswith("https://"):
+            if any(local in base for local in ("127.0.0.1", "localhost", "[::1]")):
+                base = f"http://{base}"
+            else:
+                base = f"https://{base}"
+        if base.endswith("/"):
+            base = base[:-1]
+        path_key = f"pytest-mirror-{uuid.uuid4().hex[:10]}"
+        receive_url = f"{base}/hooks/{path_key}/"
     try:
-        bd1.register_webhook(url="https://eo4xstnn32il7em.m.pipedream.net", event="item_created")
+        if receive_url:
+            bd1.register_webhook(url=receive_url, event="item_created")
     except MondayAPIError:
         pass
 
