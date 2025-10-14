@@ -56,6 +56,8 @@ def _parse_mirror_to_django_like(obj: dict) -> dict:
 
 
 @pytest.mark.live
+@pytest.mark.webhook
+@pytest.mark.slow
 def test_webhook_mirror_challenge_live(client_live, _test_config):
     # Skip gracefully if token not provided
     ts = str(int(time.time()))

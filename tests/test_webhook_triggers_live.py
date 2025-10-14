@@ -103,6 +103,8 @@ def _wait_for_event(mirror_url: str, *, expect_type: str, delays: list[int]) -> 
 
 
 @pytest.mark.live
+@pytest.mark.webhook
+@pytest.mark.slow
 def test_webhook_triggers_oo_end_to_end(client_live, _test_config):
     ts = str(int(time.time()))
     sess = Session(client_live)

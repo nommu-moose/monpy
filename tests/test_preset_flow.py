@@ -89,6 +89,7 @@ def _safe_delete_item(client, item_id: str | int) -> None:
 
 
 @pytest.mark.live
+@pytest.mark.preset
 def test_preset_oo(client_live, _test_config):
     names = _get_preset_names(_test_config)
     _, board_a_id, board_b_id = _resolve_workspace_and_boards(client_live, names)
@@ -238,6 +239,7 @@ def test_preset_oo(client_live, _test_config):
 
 
 @pytest.mark.live
+@pytest.mark.preset
 def test_preset_client(client_live, _test_config):
     names = _get_preset_names(_test_config)
     _, board_a_id, board_b_id = _resolve_workspace_and_boards(client_live, names)

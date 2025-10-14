@@ -5,6 +5,8 @@ import requests
 import pytest
 from monpy import MondayClient
 from monpy.oo.session import Session
+from monpy.exceptions import FeatureNotSupported
+import uuid
 
 
 def _load_config() -> dict:
@@ -130,3 +132,74 @@ def _runtime_behaviour(_test_config: dict, monkeypatch):
         monkeypatch.setattr(Session, "_execute_batched_item_updates", _serial_execute, raising=True)
 
 
+
+# Live test shared environment: ephemeral workspace/boards/columns reused per module
+@pytest.fixture(scope="module")
+def live_env(client_live, _test_config):
+    """
+    Create one workspace, two boards, primary groups, and a standard set of columns on board A.
+    Yields a context dict and performs best-effort cleanup at the end.
+    """
+    prefix = f"monpy-int-{uuid.uuid4().hex[:8]}"
+    ws = client_live.create_workspace(name=f"{prefix}-ws", kind="open", description="module live env")
+    b1 = client_live.create_board(name=f"{prefix}-A", board_kind="public", workspace_id=ws["id"])  # main board
+    b2 = client_live.create_board(name=f"{prefix}-B", board_kind="public", workspace_id=ws["id"])  # related board
+    g1 = client_live.create_group(b1["id"], title="grp1")
+    g2 = client_live.create_group(b2["id"], title="grp2")
+
+    sess = Session(client_live)
+    bd1 = sess.board(b1["id"])  # OO wrappers for board A
+    bd2 = sess.board(b2["id"])  # OO wrappers for board B
+
+    cols = {}
+    cols["text"] = bd1.create_column(title="Text", column_type="text").__dict__
+    cols["numbers"] = bd1.create_column(title="Number", column_type="numbers").__dict__
+    cols["status"] = bd1.create_column(title="Status", column_type="status").__dict__
+    cols["date"] = bd1.create_column(title="Due Date", column_type="date").__dict__
+    cols["link"] = bd1.create_column(title="Link", column_type="link").__dict__
+    cols["file"] = bd1.create_column(title="Files", column_type="file").__dict__
+    cols["doc"] = bd1.create_column(title="Doc", column_type="doc").__dict__
+    try:
+        cols["location"] = bd1.create_column(title="Location", column_type="location").__dict__
+    except Exception:
+        cols["location"] = None
+    cols["people"] = bd1.create_column(title="Assignee", column_type="people").__dict__
+    try:
+        cols["connect"] = bd1.create_column(
+            title="Related",
+            column_type="connect_boards",
+            defaults={"boardIds": [int(b2["id"])], "allowMultipleItems": True},
+        ).__dict__
+    except FeatureNotSupported:
+        cols["connect"] = None
+
+    bd1.refresh()
+
+    ctx = {
+        "prefix": prefix,
+        "ws": ws,
+        "b1": b1,
+        "b2": b2,
+        "g1": g1,
+        "g2": g2,
+        "sess": sess,
+        "bd1": bd1,
+        "bd2": bd2,
+        "cols": cols,
+    }
+
+    try:
+        yield ctx
+    finally:
+        # Cleanup workspace removes contained boards/items; best-effort
+        try:
+            client_live.delete_workspace(ws["id"])  # irreversible in API
+        except Exception:
+            try:
+                client_live.archive_board(b1["id"])  # type: ignore[name-defined]
+            except Exception:
+                pass
+            try:
+                client_live.archive_board(b2["id"])  # type: ignore[name-defined]
+            except Exception:
+                pass
