@@ -142,6 +142,38 @@ v = item.values.status  # first read fetches from API and caches
 v2 = item.values.status # returned from cache if within TTL
 ```
 
+Helpers
+-------
+
+- Inventory: build a Workspace → Boards → Items tree using `monpy.helpers.build_workspace_board_item_tree`.
+
+- Item Upsert: create or update an item with automatic workspace/board/column creation using `monpy.helpers.upsert_item`.
+
+  ```python
+  from monpy.client import MondayClient
+  from monpy.helpers import WorkspaceSpec, BoardSpec, ItemSpec, ColumnSpec, upsert_item
+
+  client = MondayClient(token="...")
+
+  res = upsert_item(
+      client,
+      workspace=WorkspaceSpec(name="My Workspace"),
+      board=BoardSpec(name="My Board"),
+      item=ItemSpec(name="My Item"),
+      columns=[
+          ColumnSpec(type="name", title="Name", value="My Item"),
+          ColumnSpec(type="text", title="Text", value="hello"),
+          ColumnSpec(type="status", title="Status", value={"index": 1}),
+          ColumnSpec(type="email", title="Email", value={"email": "u@example.com", "text": "User"}),
+          ColumnSpec(type="people", title="Assignee", value=[]),
+          ColumnSpec(type="connect_boards", title="Related", defaults={"boardIds": []}, value=[]),
+          ColumnSpec(type="tags", title="Tags", value=[]),
+      ],
+      group_name="grp1",
+  )
+  print(res["item_id"], res["board_id"])  # created and set values
+  ```
+
 Development
 -----------
 

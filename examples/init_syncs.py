@@ -200,7 +200,7 @@ def batch_upsert_items():
 # Contact At (connect field)
 
 
-# Archived Candidates Board (empty, no columns, just to move the updates with items)
+# Archived Candidates Board (empty, no columns, just to move the items and keep updates on them which will hold email conversations per person)
 
 
 # Organisations Board

@@ -13,3 +13,6 @@ htmlcov/
 .vscode/
 .idea/
 /examples/sample_cv.pdf
+/tests/.last_run.txt
+/tests/.last_run_all_live.txt
+/tests/.last_run_status_labels.txt
