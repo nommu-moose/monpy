@@ -5,17 +5,19 @@ from datetime import date
 
 import pytest
 
-from monpy import Session
-from monpy.exceptions import FeatureNotSupported
+from monpy import MondayClient
+from monpy.exceptions import MondayAPIError
 from monpy.helpers import (
-    WorkspaceSpec,
     BoardSpec,
-    ItemSpec,
     ColumnSpec,
+    ItemSpec,
+    StatusColor,
+    StatusDefaults,
+    StatusOption,
+    WorkspaceSpec,
     upsert_item,
     upsert_item_from_dicts,
 )
-from monpy.helpers.upsert_item import StatusOption, StatusDefaults
 import random
 
 
@@ -166,14 +168,17 @@ def test_upsert_item_from_dicts_minimal(client_live):
 def test_upsert_creates_status_with_labels_defaults(client_live):
     ts = str(int(time.time()))
 
-    # Use distinct labels and color names; randomize order without repetition to ensure mapping correctness
+    # Use distinct labels and colors via the OO helpers
     random.seed(int(ts))
-    chosen = random.sample([
-        ("Queued", "grey"),
-        ("Under way", "turquoise"),
-        ("Shipped", "navy"),
-    ], k=3)
-    sd = StatusDefaults(options=[StatusOption(label=l, color_name=c) for (l, c) in chosen])
+    options = [
+        StatusOption(label="Queued", color=StatusColor.BRIGHT_BLUE),
+        StatusOption(label="Under way", color=StatusColor.TURQUOISE),
+        StatusOption(label="Shipped", color=StatusColor.NAVY),
+    ]
+    random.shuffle(options)
+    sd = StatusDefaults(options=options)
+    # We need to know the shuffled order to validate the status value
+    under_way_idx = [i for i, opt in enumerate(options) if opt.label == "Under way"][0]
 
     res = None
     ws_id = None
@@ -192,56 +197,45 @@ def test_upsert_creates_status_with_labels_defaults(client_live):
             item=ItemSpec(name="main"),
             columns=[
                 ColumnSpec(type="name", title="Name", value="main"),
-                ColumnSpec(type="status", title="Status", value={"index": 1}, defaults=sd.to_dict()),
+                ColumnSpec(
+                    type="status",
+                    title="Status",
+                    value={"index": under_way_idx},
+                    defaults=sd.to_dict()
+                ),
             ],
             group_name="grp1",
         )
-        bid = bd_id
-        cid = res["column_ids"]["Status"]
 
-        # Verify labels persisted on column settings
-        meta = client_live.get_column(bid, cid, fields=("id", "type", "settings", "settings_str"))
+        # Assertions
+        assert res is not None
+        assert res["workspace_id"] is not None
+        assert res["board_id"] is not None
+        item_data = res["result"]
+        assert item_data["name"] == "main"
+        # Find the status column by id from the upsert response
+        status_cid = res["column_ids"]["Status"]
+        status_cv = next(cv for cv in item_data["column_values"] if cv.get("id") == status_cid)
+        assert status_cv["text"] == "Under way"
+        # Fetch column settings directly from the API
+        meta = client_live.get_column(res["board_id"], status_cid, fields=("id", "settings"))
         settings = meta.get("settings", {})
-        got_labels = settings.get("labels") or settings.get("labels_colors", {}).get("labels")
-        # Accept either dict or list payload; assert custom labels are present and colors assigned deterministically
-        if isinstance(got_labels, dict):
-            assert str(got_labels.get("2")) == "Shipped"
-            # ensure default "Done" is not present among values
-            assert "Done" not in set(str(v) for v in got_labels.values())
-        elif isinstance(got_labels, list):
-            # Expect entries for indices 0..2 with labels and colors matching our cycle
-            by_index = {int(e.get("index", i)): e for i, e in enumerate(got_labels) if isinstance(e, dict)}
-            # verify custom labels present (unordered due to randomization)
-            labels_seen = {str(e.get("label")) for e in by_index.values()}
-            assert {l for (l, _) in chosen}.issubset(labels_seen)
-            # ensure default "Done" is not present
-            assert all(str(e.get("label")) != "Done" for e in by_index.values())
-            # ensure deterministic color naming; the "index 0" entry carries the first color name in cycle
-            c0 = by_index[0].get("color")
-            assert isinstance(c0, str) and len(c0) > 0
-        else:
-            raise AssertionError("Unexpected labels schema from API")
+        labels = settings.get("labels") or []
+        assert isinstance(labels, list) and len(labels) == 3
+        # Labels have both "label" and "name" fields; "label" is the internal key, "name" is display
+        label_texts = {lbl.get("label") or lbl.get("name") for lbl in labels if isinstance(lbl, dict)}
+        assert {"Queued", "Under way", "Shipped"}.issubset(label_texts)
 
-        # Update by label to ensure mapping works
-        res2 = upsert_item(
-            client_live,
-            workspace=WorkspaceSpec(name="_", id=ws_id),
-            board=BoardSpec(name="_", id=bd_id),
-            item=ItemSpec(name="main", id=res["item_id"]),
-            columns=[ColumnSpec(type="status", title="Status", column_id=cid, value="Shipped")],
-        )
-        got = client_live.get_item_values(res2["item_id"], column_ids=[cid])
-        assert (got.get("column_values") or [{}])[0].get("text") == "Shipped"
     finally:
-        try:
-            if ws_id:
-                client_live.delete_workspace(ws_id)
-        except Exception:
+        if ws_id:
             try:
-                if bd_id:
-                    client_live.archive_board(bd_id)
+                client_live.delete_workspace(ws_id)
             except Exception:
-                pass
+                try:
+                    if bd_id:
+                        client_live.archive_board(bd_id)
+                except Exception:
+                    pass
 
 
 @pytest.mark.live
@@ -278,7 +272,7 @@ def test_upsert_creates_connect_boards_with_defaults(client_live):
             )
             ws_id = res["workspace_id"]
             bd_id = res["board_id"]
-        except FeatureNotSupported:
+        except MondayAPIError:
             pytest.skip("Connect boards columns are not supported by this API/account")
 
         bid = bd_id

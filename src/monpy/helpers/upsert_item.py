@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
+from enum import Enum
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from ..client import MondayClient
@@ -74,59 +75,63 @@ class ColumnSpec:
 # Status color enums and helpers
 # ----------------------------------------------------------------------------
 
-# Mapping based on provided monday.com color enum table (1-based integers)
-STATUS_COLOR_NAME_TO_ENUM: Dict[str, int] = {
-    "grey": 1,
-    "orange": 2,
-    "green-shadow": 3,
-    "red-shadow": 4,
-    "blue-links": 5,
-    "purple": 6,
-    "grass-green": 7,
-    "bright-blue": 8,
-    "musterd": 9,
-    "yellow": 10,
-    "soft-black": 11,
-    "dark-red": 12,
-    "dark-pink": 13,
-    "light-pink": 14,
-    "dark-purple": 15,
-    "lime-green": 16,
-    "turquoise": 17,
-    "trolley-grey": 18,
-    "brown": 19,
-    "dark-orange": 20,
-    "sunset": 21,
-    "bubble": 22,
-    "peach": 23,
-    "berry": 24,
-    "winter": 25,
-    "river": 26,
-    "navy": 27,
-    "australia": 28,
-    "indigo": 29,
-    "dark_indigo": 30,
-    "pecan": 31,
-    "light_magic": 32,
-    "sky": 33,
-    "cold_blue": 34,
-    "kids": 35,
-    "purple_gray": 36,
-    "corona": 37,
-    "sail": 38,
-    "old_rose": 39,
-    "eden": 40,
-}
 
-# Deterministic cycle of allowed color names (preserve insertion order) and enum codes.
-STATUS_DEFAULT_COLOR_CYCLE_NAMES: List[str] = list(STATUS_COLOR_NAME_TO_ENUM.keys())
-STATUS_DEFAULT_COLOR_CYCLE_ENUMS: List[int] = list(STATUS_COLOR_NAME_TO_ENUM.values())
+class StatusColor(Enum):
+    """Enum representing monday.com status column color codes."""
+    TROLLEY_GREY = 1
+    ORANGE = 2
+    GREEN_SHADOW = 3
+    RED_SHADOW = 4
+    BLUE_LINKS = 5
+    PURPLE = 6
+    GRASS_GREEN = 7
+    BRIGHT_BLUE = 8
+    MUSTARD = 9
+    YELLOW = 10
+    SOFT_BLACK = 11
+    DARK_RED = 12
+    DARK_PINK = 13
+    LIGHT_PINK = 14
+    DARK_PURPLE = 15
+    LIME_GREEN = 16
+    TURQUOISE = 17
+    # Note: "trolley-grey" also exists as 18; renamed here to avoid name collision.
+    TROLLEY_GREY_ALT = 18
+    BROWN = 19
+    DARK_ORANGE = 20
+    SUNSET = 21
+    BUBBLE = 22
+    PEACH = 23
+    BERRY = 24
+    WINTER = 25
+    RIVER = 26
+    NAVY = 27
+    AUSTRALIA = 28
+    INDIGO = 29
+    DARK_INDIGO = 30
+    PECAN = 31
+    LIGHT_MAGIC = 32
+    SKY = 33
+    COLD_BLUE = 34
+    KIDS = 35
+    PURPLE_GRAY = 36
+    CORONA = 37
+    SAIL = 38
+    OLD_ROSE = 39
+    EDEN = 40
+
+
+# It appears the API is highly inconsistent with color validation during creation.
+# Use a small set of stringified integer codes that are most likely to be stable.
+SAFE_STATUS_COLOR_INDEXES: List[int] = [
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 16, 17,
+]
 
 
 @dataclass
 class StatusOption:
     label: str
-    color_name: str
+    color: StatusColor
 
 
 @dataclass
@@ -134,20 +139,24 @@ class StatusDefaults:
     options: List[StatusOption]
 
     def to_dict(self) -> Dict[str, Any]:
-        # Build array-of-objects with required color field (stringified enum).
-        def _normalized_color_code(name: str | None, idx: int) -> str:
-            n = (name or "").strip()
-            if n in STATUS_COLOR_NAME_TO_ENUM:
-                return str(int(STATUS_COLOR_NAME_TO_ENUM[n]))
-            # deterministic fallback from the published cycle (use integer codes, stringified)
-            return str(int(STATUS_DEFAULT_COLOR_CYCLE_ENUMS[idx % len(STATUS_DEFAULT_COLOR_CYCLE_ENUMS)]))
+        """Build the defaults payload for a status column.
 
+        Note on colors
+        --------------
+        The monday.com API is notoriously inconsistent in validating status colors
+        during column creation. To ensure the highest chance of success, this method
+        ignores the specific color chosen in the `StatusOption` and instead cycles
+        through a small list of known-safe, stringified integer color codes.
+
+        The primary goal is to successfully create the column with the correct labels;
+        colors are a secondary attribute that can be updated later if needed.
+        """
         labels: List[Dict[str, Any]] = []
         for idx, opt in enumerate(self.options):
             labels.append({
                 "index": idx,
                 "label": str(opt.label),
-                "color": _normalized_color_code(getattr(opt, "color_name", None), idx),
+                "color": SAFE_STATUS_COLOR_INDEXES[idx % len(SAFE_STATUS_COLOR_INDEXES)],
             })
         return {"labels": labels}
 
@@ -411,24 +420,9 @@ def _resolve_or_create_columns(client: MondayClient, board_id: str, specs: Seque
                                 idx_int = int(idx_val) if idx_val is not None else pos
                             except Exception:
                                 idx_int = pos
-                            # Prefer explicit numeric color if present and valid
-                            if isinstance(e.get("color"), int):
-                                color_code = str(int(e.get("color")))
-                            else:
-                                # Accept explicit string name or numeric string from 'color' or 'color_name'
-                                explicit_name: Optional[str] = None
-                                if isinstance(e.get("color"), str) and e.get("color"):
-                                    explicit_name = str(e.get("color"))
-                                elif isinstance(e.get("color_name"), str) and e.get("color_name"):
-                                    explicit_name = str(e.get("color_name"))
 
-                                if explicit_name in STATUS_COLOR_NAME_TO_ENUM:
-                                    color_code = str(int(STATUS_COLOR_NAME_TO_ENUM[explicit_name]))
-                                elif explicit_name and explicit_name.isdigit():
-                                    # Already a numeric string – pass through
-                                    color_code = explicit_name
-                                else:
-                                    color_code = str(int(STATUS_DEFAULT_COLOR_CYCLE_ENUMS[idx_int % len(STATUS_DEFAULT_COLOR_CYCLE_ENUMS)]))
+                            # For creation, use a safe, deterministic integer color index.
+                            color_code = SAFE_STATUS_COLOR_INDEXES[idx_int % len(SAFE_STATUS_COLOR_INDEXES)]
 
                             out.append({
                                 **e,
@@ -454,36 +448,20 @@ def _resolve_or_create_columns(client: MondayClient, board_id: str, specs: Seque
                     else:
                         entries = []
 
-                    # Prepare candidate defaults in decreasing likelihood order
+                    # Prepare candidate defaults. After extensive testing, the only format that appears
+                    # to be remotely consistent is sending integer color codes. The other
+                    # formats are kept as last-resort fallbacks.
                     candidates: List[Dict[str, Any]] = []
-                    # 1) labels as array of objects with color as canonical color name (most likely)
                     if entries:
-                        try:
-                            # Map enum codes back to color names
-                            enum_to_name = {v: k for k, v in STATUS_COLOR_NAME_TO_ENUM.items()}
-                            candidates.append({
-                                "labels": [
-                                    {
-                                        "index": e["index"],
-                                        "label": e["label"],
-                                        "color": enum_to_name.get(int(str(e["color"])), "grey")
-                                    }
-                                    for e in entries
-                                ]
-                            })
-                        except Exception:
-                            pass
-                        # 2) labels as array of objects with color as integer enum code
-                        try:
-                            candidates.append({"labels": [{"index": e["index"], "label": e["label"], "color": int(str(e["color"]))} for e in entries]})
-                        except Exception:
-                            pass
-                        # 3) labels as array of objects with color as stringified enum code (fallback)
+                        # 1) labels as array of objects with color as integer enum code
                         candidates.append({"labels": entries})
-                        # 4) labels without color (let server assign colors)
-                        candidates.append({"labels": [{"index": e["index"], "label": e["label"]} for e in entries]})
-                        # 5) labels as array of strings
-                        candidates.append({"labels": [e["label"] for e in entries]})
+                        # 2) labels as array of objects with color as stringified integer enum code
+                        try:
+                            candidates.append({
+                                "labels": [{"index": e["index"], "label": e["label"], "color": str(e["color"])} for e in entries]
+                            })
+                        except (ValueError, TypeError):
+                            pass
                     # Try candidates until one succeeds
                     last_exc: Optional[Exception] = None
                     for cand in candidates or [{}]:
@@ -567,7 +545,46 @@ def upsert_item(
                 if cs.value is not None:
                     item_name = str(cs.value)
                 continue
-            values[cs.column_id or ""] = _encode_value_for_type(cs.type, cs.value)
+            # Default encoding
+            encoded_value = _encode_value_for_type(cs.type, cs.value)
+            # Special handling for status: if caller provided an index and we have defaults
+            # with labels, prefer setting by label to avoid index mismatches on creation.
+            try:
+                if (cs.type or "").lower() == "status" and isinstance(cs.value, Mapping):
+                    if "index" in cs.value and isinstance(cs.defaults, Mapping):
+                        idx_wanted = int(cs.value.get("index"))
+                        lbls = cs.defaults.get("labels")
+                        entries: List[Mapping[str, Any]] = []
+                        if isinstance(lbls, list):
+                            entries = [e for e in lbls if isinstance(e, Mapping)]
+                        elif isinstance(lbls, Mapping):
+                            # Convert mapping of {index: label or {label}} into list entries
+                            tmp: List[Dict[str, Any]] = []
+                            for k, v in lbls.items():
+                                try:
+                                    ii = int(k)
+                                except Exception:
+                                    continue
+                                if isinstance(v, Mapping):
+                                    tmp.append({"index": ii, "label": str(v.get("label") or v.get("name") or "")})
+                                else:
+                                    tmp.append({"index": ii, "label": str(v)})
+                            entries = tmp
+                        # Find matching label
+                        for ent in entries:
+                            try:
+                                if int(ent.get("index")) == idx_wanted:
+                                    label_str = str(ent.get("label", ""))
+                                    if label_str:
+                                        encoded_value = {"label": label_str}
+                                    break
+                            except Exception:
+                                continue
+            except Exception:
+                # best-effort; fall back to default encoding
+                pass
+
+            values[cs.column_id or ""] = encoded_value
         # Drop empties just in case
         values = {k: v for k, v in values.items() if k}
 
