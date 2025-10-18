@@ -118,9 +118,9 @@ STATUS_COLOR_NAME_TO_ENUM: Dict[str, int] = {
     "eden": 40,
 }
 
-# Deterministic cycle of allowed color names (preserve insertion order).
-# Use the canonical monday color names provided by the enum table above.
+# Deterministic cycle of allowed color names (preserve insertion order) and enum codes.
 STATUS_DEFAULT_COLOR_CYCLE_NAMES: List[str] = list(STATUS_COLOR_NAME_TO_ENUM.keys())
+STATUS_DEFAULT_COLOR_CYCLE_ENUMS: List[int] = list(STATUS_COLOR_NAME_TO_ENUM.values())
 
 
 @dataclass
@@ -134,13 +134,21 @@ class StatusDefaults:
     options: List[StatusOption]
 
     def to_dict(self) -> Dict[str, Any]:
+        # Build array-of-objects with required color field (stringified enum).
+        def _normalized_color_code(name: str | None, idx: int) -> str:
+            n = (name or "").strip()
+            if n in STATUS_COLOR_NAME_TO_ENUM:
+                return str(int(STATUS_COLOR_NAME_TO_ENUM[n]))
+            # deterministic fallback from the published cycle (use integer codes, stringified)
+            return str(int(STATUS_DEFAULT_COLOR_CYCLE_ENUMS[idx % len(STATUS_DEFAULT_COLOR_CYCLE_ENUMS)]))
+
         labels: List[Dict[str, Any]] = []
         for idx, opt in enumerate(self.options):
-            color_name = str(opt.color_name)
-            if color_name not in STATUS_COLOR_NAME_TO_ENUM:
-                # Fallback to deterministic cycle of canonical names
-                color_name = STATUS_DEFAULT_COLOR_CYCLE_NAMES[idx % len(STATUS_DEFAULT_COLOR_CYCLE_NAMES)]
-            labels.append({"index": idx, "label": opt.label, "color": color_name})
+            labels.append({
+                "index": idx,
+                "label": str(opt.label),
+                "color": _normalized_color_code(getattr(opt, "color_name", None), idx),
+            })
         return {"labels": labels}
 
 
@@ -363,79 +371,152 @@ def _resolve_or_create_columns(client: MondayClient, board_id: str, specs: Seque
             cid = title_to_id.get(cs.title)
 
         if cid is None:
-            # create with defaults when provided; normalize well-known schemas
+            # create with defaults when provided; normalize well-known schemas and try fallbacks for Status
             try:
                 defaults_payload: Optional[Dict[str, Any]] = None
                 if isinstance(cs.defaults, Mapping):
                     defaults_payload = dict(cs.defaults)
-                    # Normalize Status defaults: accept mapping, list[str], or legacy labels_colors
-                    if t == "status":
-                        lbls = defaults_payload.get("labels")
-                        # Support legacy { labels_colors: { labels: { index: name } } }
-                        if lbls is None:
+                # Status special: build normalized entries and try multiple schema variants
+                if t == "status":
+                    # Build entries from provided defaults (labels -> [{index,label,color}]) using robust coercion
+                    lbls = (defaults_payload or {}).get("labels") if isinstance(defaults_payload, Mapping) else None
+                    if lbls is None and isinstance(defaults_payload, Mapping):
+                        try:
+                            lc = defaults_payload.get("labels_colors", {})
+                            if isinstance(lc, Mapping):
+                                lbls = lc.get("labels")
+                        except Exception:
+                            pass
+
+                    def _build_labels_list(m: Mapping[Any, Any]) -> List[Dict[str, Any]]:
+                        items: List[Tuple[int, str]] = []
+                        for k, v in m.items():
                             try:
-                                lc = defaults_payload.get("labels_colors", {})
-                                if isinstance(lc, Mapping):
-                                    lbls = lc.get("labels")
+                                idx = int(k)
                             except Exception:
-                                pass
+                                continue
+                            if isinstance(v, Mapping):
+                                lbl = str(v.get("label") or v.get("name") or "")
+                            else:
+                                lbl = str(v)
+                            items.append((idx, lbl))
+                        items.sort(key=lambda x: x[0])
+                        return [{"index": i, "label": l} for (i, l) in items]
 
-                        def _build_labels_objs_from_mapping(m: Mapping[Any, Any]) -> List[Dict[str, Any]]:
-                            items_sorted: List[Tuple[int, Any]] = []
-                            for k, v in m.items():
-                                try:
-                                    idx = int(k)
-                                except Exception:
-                                    continue
-                                items_sorted.append((idx, v))
-                            items_sorted.sort(key=lambda x: x[0])
-                            out: List[Dict[str, Any]] = []
-                            for idx, val in items_sorted:
-                                label = (
-                                    str(val.get("label") or val.get("name") or "")
-                                    if isinstance(val, Mapping)
-                                    else str(val)
-                                )
-                                # Choose a deterministic color NAME for this position
-                                color_name = STATUS_DEFAULT_COLOR_CYCLE_NAMES[idx % len(STATUS_DEFAULT_COLOR_CYCLE_NAMES)]
-                                out.append({"index": idx, "label": label, "color": color_name})
-                            return out
+                    def _ensure_label_colors(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+                        out: List[Dict[str, Any]] = []
+                        for pos, e in enumerate(entries):
+                            idx_val = e.get("index")
+                            try:
+                                idx_int = int(idx_val) if idx_val is not None else pos
+                            except Exception:
+                                idx_int = pos
+                            # Prefer explicit numeric color if present and valid
+                            if isinstance(e.get("color"), int):
+                                color_code = str(int(e.get("color")))
+                            else:
+                                # Accept explicit string name or numeric string from 'color' or 'color_name'
+                                explicit_name: Optional[str] = None
+                                if isinstance(e.get("color"), str) and e.get("color"):
+                                    explicit_name = str(e.get("color"))
+                                elif isinstance(e.get("color_name"), str) and e.get("color_name"):
+                                    explicit_name = str(e.get("color_name"))
 
-                        if isinstance(lbls, Mapping):
-                            defaults_payload["labels"] = _build_labels_objs_from_mapping(lbls)
-                            # Remove legacy container to avoid conflicts
-                            if "labels_colors" in defaults_payload:
-                                defaults_payload.pop("labels_colors", None)
-                        elif isinstance(lbls, list):
-                            # If provided as list of strings, convert to list of {index,label,color}
-                            if lbls and all(isinstance(x, str) for x in lbls):
-                                defaults_payload["labels"] = [
+                                if explicit_name in STATUS_COLOR_NAME_TO_ENUM:
+                                    color_code = str(int(STATUS_COLOR_NAME_TO_ENUM[explicit_name]))
+                                elif explicit_name and explicit_name.isdigit():
+                                    # Already a numeric string – pass through
+                                    color_code = explicit_name
+                                else:
+                                    color_code = str(int(STATUS_DEFAULT_COLOR_CYCLE_ENUMS[idx_int % len(STATUS_DEFAULT_COLOR_CYCLE_ENUMS)]))
+
+                            out.append({
+                                **e,
+                                "index": idx_int,
+                                "label": str(e.get("label", "")),
+                                "color": color_code,
+                            })
+                        return out
+
+                    entries: List[Dict[str, Any]]
+                    if isinstance(lbls, Mapping):
+                        entries = _ensure_label_colors(_build_labels_list(lbls))
+                    elif isinstance(lbls, list):
+                        if lbls and all(isinstance(x, str) for x in lbls):
+                            entries = _ensure_label_colors([{ "index": i, "label": str(x)} for i, x in enumerate(lbls)])
+                        elif lbls and all(hasattr(x, "label") and hasattr(x, "color_name") for x in lbls):  # type: ignore[truthy-bool]
+                            raw = [{"index": i, "label": str(getattr(x, "label")), "color_name": str(getattr(x, "color_name", ""))} for i, x in enumerate(lbls)]
+                            entries = _ensure_label_colors(raw)
+                        elif lbls and all(isinstance(e, Mapping) for e in lbls):
+                            entries = _ensure_label_colors([dict(e) for e in lbls])
+                        else:
+                            entries = []
+                    else:
+                        entries = []
+
+                    # Prepare candidate defaults in decreasing likelihood order
+                    candidates: List[Dict[str, Any]] = []
+                    # 1) labels as array of objects with color as canonical color name (most likely)
+                    if entries:
+                        try:
+                            # Map enum codes back to color names
+                            enum_to_name = {v: k for k, v in STATUS_COLOR_NAME_TO_ENUM.items()}
+                            candidates.append({
+                                "labels": [
                                     {
-                                        "index": i,
-                                        "label": str(x),
-                                        "color": STATUS_DEFAULT_COLOR_CYCLE_NAMES[i % len(STATUS_DEFAULT_COLOR_CYCLE_NAMES)],
+                                        "index": e["index"],
+                                        "label": e["label"],
+                                        "color": enum_to_name.get(int(str(e["color"])), "grey")
                                     }
-                                    for i, x in enumerate(lbls)
+                                    for e in entries
                                 ]
-                            # If provided as list of StatusOption or dicts, coerce accordingly
-                            elif lbls and all(hasattr(x, "label") and hasattr(x, "color_name") for x in lbls):  # type: ignore[truthy-bool]
-                                labels_norm: List[Dict[str, Any]] = []
-                                for i, x in enumerate(lbls):
-                                    cn = getattr(x, "color_name")
-                                    color_name = cn if cn in STATUS_COLOR_NAME_TO_ENUM else STATUS_DEFAULT_COLOR_CYCLE_NAMES[i % len(STATUS_DEFAULT_COLOR_CYCLE_NAMES)]
-                                    labels_norm.append({"index": i, "label": str(getattr(x, "label")), "color": color_name})
-                                defaults_payload["labels"] = labels_norm
-                        # else: if already list of objects, keep as-is
-
-                created = client.create_column(
-                    board_id,
-                    title=cs.title,
-                    column_type=t,
-                    defaults=defaults_payload,
-                    description=cs.description,
-                )
-                cid = str(created.get("id"))
-                title_to_id[cs.title] = cid
+                            })
+                        except Exception:
+                            pass
+                        # 2) labels as array of objects with color as integer enum code
+                        try:
+                            candidates.append({"labels": [{"index": e["index"], "label": e["label"], "color": int(str(e["color"]))} for e in entries]})
+                        except Exception:
+                            pass
+                        # 3) labels as array of objects with color as stringified enum code (fallback)
+                        candidates.append({"labels": entries})
+                        # 4) labels without color (let server assign colors)
+                        candidates.append({"labels": [{"index": e["index"], "label": e["label"]} for e in entries]})
+                        # 5) labels as array of strings
+                        candidates.append({"labels": [e["label"] for e in entries]})
+                    # Try candidates until one succeeds
+                    last_exc: Optional[Exception] = None
+                    for cand in candidates or [{}]:
+                        try:
+                            created = client.create_column(
+                                board_id,
+                                title=cs.title,
+                                column_type=t,
+                                defaults=cand if cand else None,
+                                description=cs.description,
+                            )
+                            cid = str(created.get("id"))
+                            title_to_id[cs.title] = cid
+                            break
+                        except MondayAPIError as exc:
+                            last_exc = exc
+                            continue
+                    else:
+                        # If all candidates failed, raise the last error
+                        if last_exc:
+                            raise last_exc
+                        raise MondayAPIError("Failed to create status column with provided defaults")
+                else:
+                    # Non-status: straight pass-through
+                    created = client.create_column(
+                        board_id,
+                        title=cs.title,
+                        column_type=t,
+                        defaults=defaults_payload,
+                        description=cs.description,
+                    )
+                    cid = str(created.get("id"))
+                    title_to_id[cs.title] = cid
             except MondayAPIError:
                 # Surface the error – caller may retry after fixing prerequisites
                 raise

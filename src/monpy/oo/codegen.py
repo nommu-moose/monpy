@@ -24,10 +24,10 @@ from monpy.oo.columns.values import LocationValue
 CLASS_TEMPLATE = """
 @dataclass
 class {class_name}(Item):
-    """Typed item model for board {board_id}.
+    '''Typed item model for board {board_id}.
 
     Columns exposed as properties on `.values` for completion.
-    """
+    '''
 {properties}
 """
 

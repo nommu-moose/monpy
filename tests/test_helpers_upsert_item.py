@@ -73,6 +73,8 @@ def test_upsert_item_end_to_end(client_live):
     ]
 
     res = None
+    ws_id = None
+    bd_id = None
     try:
         # Initial create
         res = upsert_item(
@@ -83,8 +85,10 @@ def test_upsert_item_end_to_end(client_live):
             columns=cols,
             group_name="grp1",
         )
+        ws_id = res["workspace_id"]
+        bd_id = res["board_id"]
 
-        assert res["workspace_id"] and res["board_id"] and res["item_id"]
+        assert ws_id and bd_id and res["item_id"]
         item_id = res["item_id"]
 
         # Verify values reflected
@@ -98,8 +102,8 @@ def test_upsert_item_end_to_end(client_live):
         ]
         res2 = upsert_item(
             client_live,
-            workspace=WorkspaceSpec(name=ws.name, id=res["workspace_id"]),
-            board=BoardSpec(name=bd.name, id=res["board_id"]),
+            workspace=WorkspaceSpec(name=ws.name, id=ws_id),
+            board=BoardSpec(name=bd.name, id=bd_id),
             item=ItemSpec(name="main", id=item_id),
             columns=cols_update,
         )
@@ -107,11 +111,13 @@ def test_upsert_item_end_to_end(client_live):
     finally:
         # cleanup: best-effort – deleting the workspace removes contained boards/items
         try:
-            client_live.delete_workspace(res["workspace_id"])  # type: ignore[index]
+            if ws_id:
+                client_live.delete_workspace(ws_id)
         except Exception:
             # fallback to archiving if workspace deletion is restricted
             try:
-                client_live.archive_board(res["board_id"])  # type: ignore[index]
+                if bd_id:
+                    client_live.archive_board(bd_id)
             except Exception:
                 pass
         try:
@@ -126,6 +132,8 @@ def test_upsert_item_end_to_end(client_live):
 def test_upsert_item_from_dicts_minimal(client_live):
     ts = str(int(time.time()))
     out = None
+    ws_id = None
+    bd_id = None
     try:
         out = upsert_item_from_dicts(
             client_live,
@@ -138,15 +146,17 @@ def test_upsert_item_from_dicts_minimal(client_live):
             ],
             group_name="grp1",
         )
-        assert out["workspace_id"] and out["board_id"] and out["item_id"]
+        ws_id = out["workspace_id"]
+        bd_id = out["board_id"]
+        assert ws_id and bd_id and out["item_id"]
     finally:
         try:
-            if out:
-                client_live.delete_workspace(out["workspace_id"])  # type: ignore[index]
+            if ws_id:
+                client_live.delete_workspace(ws_id)
         except Exception:
             try:
-                if out:
-                    client_live.archive_board(out["board_id"])  # type: ignore[index]
+                if bd_id:
+                    client_live.archive_board(bd_id)
             except Exception:
                 pass
 
@@ -166,11 +176,19 @@ def test_upsert_creates_status_with_labels_defaults(client_live):
     sd = StatusDefaults(options=[StatusOption(label=l, color_name=c) for (l, c) in chosen])
 
     res = None
+    ws_id = None
+    bd_id = None
     try:
+        # Pre-create workspace and board to guarantee we can tear them down even if creation fails mid-flight
+        ws_raw = client_live.create_workspace(name=f"monpy-helper-status-{ts}", kind="open", description="status test")
+        ws_id = str(ws_raw["id"])  # type: ignore[index]
+        bd_raw = client_live.create_board(name=f"board-status-{ts}", workspace_id=ws_id)
+        bd_id = str(bd_raw["id"])  # type: ignore[index]
+
         res = upsert_item(
             client_live,
-            workspace=WorkspaceSpec(name=f"monpy-helper-status-{ts}"),
-            board=BoardSpec(name=f"board-status-{ts}"),
+            workspace=WorkspaceSpec(name=f"monpy-helper-status-{ts}", id=ws_id),
+            board=BoardSpec(name=f"board-status-{ts}", id=bd_id),
             item=ItemSpec(name="main"),
             columns=[
                 ColumnSpec(type="name", title="Name", value="main"),
@@ -178,7 +196,7 @@ def test_upsert_creates_status_with_labels_defaults(client_live):
             ],
             group_name="grp1",
         )
-        bid = res["board_id"]
+        bid = bd_id
         cid = res["column_ids"]["Status"]
 
         # Verify labels persisted on column settings
@@ -207,8 +225,8 @@ def test_upsert_creates_status_with_labels_defaults(client_live):
         # Update by label to ensure mapping works
         res2 = upsert_item(
             client_live,
-            workspace=WorkspaceSpec(name="_", id=res["workspace_id"]),
-            board=BoardSpec(name="_", id=bid),
+            workspace=WorkspaceSpec(name="_", id=ws_id),
+            board=BoardSpec(name="_", id=bd_id),
             item=ItemSpec(name="main", id=res["item_id"]),
             columns=[ColumnSpec(type="status", title="Status", column_id=cid, value="Shipped")],
         )
@@ -216,12 +234,12 @@ def test_upsert_creates_status_with_labels_defaults(client_live):
         assert (got.get("column_values") or [{}])[0].get("text") == "Shipped"
     finally:
         try:
-            if res:
-                client_live.delete_workspace(res["workspace_id"])  # type: ignore[index]
+            if ws_id:
+                client_live.delete_workspace(ws_id)
         except Exception:
             try:
-                if res:
-                    client_live.archive_board(res["board_id"])  # type: ignore[index]
+                if bd_id:
+                    client_live.archive_board(bd_id)
             except Exception:
                 pass
 
@@ -238,6 +256,8 @@ def test_upsert_creates_connect_boards_with_defaults(client_live):
     target = client_live.create_item(bd_rel["id"], group_id=g_rel["id"], item_name="target")
 
     res = None
+    ws_id = None
+    bd_id = None
     try:
         try:
             res = upsert_item(
@@ -256,10 +276,12 @@ def test_upsert_creates_connect_boards_with_defaults(client_live):
                 ],
                 group_name="grp1",
             )
+            ws_id = res["workspace_id"]
+            bd_id = res["board_id"]
         except FeatureNotSupported:
             pytest.skip("Connect boards columns are not supported by this API/account")
 
-        bid = res["board_id"]
+        bid = bd_id
         cid = res["column_ids"]["Related"]
 
         # Verify defaults reflected on metadata
@@ -282,12 +304,12 @@ def test_upsert_creates_connect_boards_with_defaults(client_live):
             except Exception:
                 pass
         try:
-            if res:
-                client_live.delete_workspace(res["workspace_id"])  # type: ignore[index]
+            if ws_id:
+                client_live.delete_workspace(ws_id)
         except Exception:
             try:
-                if res:
-                    client_live.archive_board(res["board_id"])  # type: ignore[index]
+                if bd_id:
+                    client_live.archive_board(bd_id)
             except Exception:
                 pass
 

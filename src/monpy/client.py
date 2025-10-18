@@ -183,6 +183,9 @@ class MondayClient:
         if variables:
             payload["variables"] = variables
 
+        # Prepare debug artifacts but only print them on failure when dev_mode is enabled
+        dbg_headers = None
+        dbg_payload = None
         if self._dev_mode:
             try:
                 debug_headers = dict(self._session.headers)
@@ -197,9 +200,6 @@ class MondayClient:
             except Exception:
                 # Fallback best-effort serialization
                 dbg_payload = str(payload)
-            print("[monpy][dev] POST", self.endpoint)
-            print("[monpy][dev] Headers:\n" + dbg_headers)
-            print("[monpy][dev] Payload:\n" + dbg_payload)
 
         total_retries = max(self.max_retries, self.retries)
         for attempt in range(total_retries + 1):
@@ -212,6 +212,16 @@ class MondayClient:
                 if attempt < self.max_retries:
                     time.sleep(self.backoff * 2**attempt)
                     continue
+                if self._dev_mode:
+                    try:
+                        print("[monpy][dev] POST", self.endpoint)
+                        if dbg_headers is not None:
+                            print("[monpy][dev] Headers:\n" + dbg_headers)
+                        if dbg_payload is not None:
+                            print("[monpy][dev] Payload:\n" + dbg_payload)
+                        print("[monpy][dev] Failure: Network error after retries")
+                    except Exception:
+                        pass
                 raise NetworkError("Network error") from exc
 
             # Gracefully handle 429 “too many requests”
@@ -231,6 +241,16 @@ class MondayClient:
 
             # Anything other than HTTP 200 is fatal
             if response.status_code != 200:
+                if self._dev_mode:
+                    try:
+                        print("[monpy][dev] POST", self.endpoint)
+                        if dbg_headers is not None:
+                            print("[monpy][dev] Headers:\n" + dbg_headers)
+                        if dbg_payload is not None:
+                            print("[monpy][dev] Payload:\n" + dbg_payload)
+                        print(f"[monpy][dev] Failure: HTTP {response.status_code}: {response.text}")
+                    except Exception:
+                        pass
                 raise HTTPError(f"HTTP {response.status_code}: {response.text}")
 
             data = response.json()
@@ -248,6 +268,20 @@ class MondayClient:
                 if retry:
                     time.sleep(self.backoff * 2**attempt)
                     continue
+                if self._dev_mode:
+                    try:
+                        print("[monpy][dev] POST", self.endpoint)
+                        if dbg_headers is not None:
+                            print("[monpy][dev] Headers:\n" + dbg_headers)
+                        if dbg_payload is not None:
+                            print("[monpy][dev] Payload:\n" + dbg_payload)
+                        try:
+                            dbg_errors = json.dumps(data.get("errors"), ensure_ascii=False, indent=2, sort_keys=True)
+                        except Exception:
+                            dbg_errors = str(data.get("errors"))
+                        print("[monpy][dev] Failure: GraphQL errors:\n" + dbg_errors)
+                    except Exception:
+                        pass
                 raise GraphQLError(
                     f"GraphQL errors returned for: \n{variables}\n", errors=data["errors"]
                 )

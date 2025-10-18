@@ -59,10 +59,22 @@ def client_live(_test_config: dict):
         backoff=backoff,
         endpoint=endpoint,
         files_endpoint=files_endpoint,
+        dev_mode=True,
     )
 
     # Additional 403-retry knob
     client.retries = _as_int(_test_config.get("RETRIES"), 0)
+    # Allow overriding dev mode via tests/config.json if needed
+    try:
+        dm = _test_config.get("DEV_MODE")
+        if dm is not None:
+            if isinstance(dm, str):
+                enabled = dm.strip().lower() in {"1", "true", "yes", "y"}
+            else:
+                enabled = bool(dm)
+            client.set_dev_mode(enabled)
+    except Exception:
+        pass
     return client
 
 
