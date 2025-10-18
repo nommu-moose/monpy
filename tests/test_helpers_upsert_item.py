@@ -171,7 +171,7 @@ def test_upsert_creates_status_with_labels_defaults(client_live):
     # Use distinct labels and colors via the OO helpers
     random.seed(int(ts))
     options = [
-        StatusOption(label="Queued", color=StatusColor.BRIGHT_BLUE),
+        StatusOption(label="Queued", color=StatusColor.ORANGE),
         StatusOption(label="Under way", color=StatusColor.TURQUOISE),
         StatusOption(label="Shipped", color=StatusColor.NAVY),
     ]
