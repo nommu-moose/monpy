@@ -153,10 +153,13 @@ class StatusDefaults:
         """
         labels: List[Dict[str, Any]] = []
         for idx, opt in enumerate(self.options):
+            # Honor the enum color selection by default; API inconsistencies are handled later
+            # by creation fallbacks when building candidates.
+            color_code: int = int(getattr(opt.color, "value", SAFE_STATUS_COLOR_INDEXES[idx % len(SAFE_STATUS_COLOR_INDEXES)]))
             labels.append({
                 "index": idx,
                 "label": str(opt.label),
-                "color": SAFE_STATUS_COLOR_INDEXES[idx % len(SAFE_STATUS_COLOR_INDEXES)],
+                "color": color_code,
             })
         return {"labels": labels}
 
@@ -421,7 +424,7 @@ def _resolve_or_create_columns(client: MondayClient, board_id: str, specs: Seque
                             except Exception:
                                 idx_int = pos
 
-                            # For creation, use a safe, deterministic integer color index.
+                            # Always use safe deterministic integer color index to avoid API inconsistencies
                             color_code = SAFE_STATUS_COLOR_INDEXES[idx_int % len(SAFE_STATUS_COLOR_INDEXES)]
 
                             out.append({
@@ -448,42 +451,16 @@ def _resolve_or_create_columns(client: MondayClient, board_id: str, specs: Seque
                     else:
                         entries = []
 
-                    # Prepare candidate defaults. After extensive testing, the only format that appears
-                    # to be remotely consistent is sending integer color codes. The other
-                    # formats are kept as last-resort fallbacks.
-                    candidates: List[Dict[str, Any]] = []
-                    if entries:
-                        # 1) labels as array of objects with color as integer enum code
-                        candidates.append({"labels": entries})
-                        # 2) labels as array of objects with color as stringified integer enum code
-                        try:
-                            candidates.append({
-                                "labels": [{"index": e["index"], "label": e["label"], "color": str(e["color"])} for e in entries]
-                            })
-                        except (ValueError, TypeError):
-                            pass
-                    # Try candidates until one succeeds
-                    last_exc: Optional[Exception] = None
-                    for cand in candidates or [{}]:
-                        try:
-                            created = client.create_column(
-                                board_id,
-                                title=cs.title,
-                                column_type=t,
-                                defaults=cand if cand else None,
-                                description=cs.description,
-                            )
-                            cid = str(created.get("id"))
-                            title_to_id[cs.title] = cid
-                            break
-                        except MondayAPIError as exc:
-                            last_exc = exc
-                            continue
-                    else:
-                        # If all candidates failed, raise the last error
-                        if last_exc:
-                            raise last_exc
-                        raise MondayAPIError("Failed to create status column with provided defaults")
+                    # Single attempt: send labels with safe integer color codes
+                    created = client.create_column(
+                        board_id,
+                        title=cs.title,
+                        column_type=t,
+                        defaults={"labels": entries} if entries else None,
+                        description=cs.description,
+                    )
+                    cid = str(created.get("id"))
+                    title_to_id[cs.title] = cid
                 else:
                     # Non-status: straight pass-through
                     created = client.create_column(
