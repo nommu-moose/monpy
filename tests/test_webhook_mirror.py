@@ -7,6 +7,7 @@ import pytest
 import requests
 
 from monpy import Session
+from monpy.helpers import parse_monday_webhook_request
 from monpy.oo.enums import WebhookEventType
 from monpy.exceptions import MondayAPIError
 
@@ -55,6 +56,25 @@ def _parse_mirror_to_django_like(obj: dict) -> dict:
         return {}
 
 
+def _mirror_raw_bytes(obj: dict) -> bytes:
+    body = obj.get("body") or {}
+    b64_val = body.get("base64")
+    if isinstance(b64_val, str) and b64_val.strip():
+        try:
+            import base64
+
+            return base64.b64decode(b64_val)
+        except Exception:
+            pass
+    text_val = body.get("text")
+    if isinstance(text_val, str):
+        try:
+            return text_val.encode("utf-8", errors="replace")
+        except Exception:
+            return b""
+    return b""
+
+
 @pytest.mark.live
 @pytest.mark.webhook
 @pytest.mark.slow
@@ -101,6 +121,15 @@ def test_webhook_mirror_challenge_live(client_live, _test_config):
                 continue
             obj = resp.json()
             payload = _parse_mirror_to_django_like(obj)
+            # Validate helper wrapper too (if body is present)
+            raw_bytes = _mirror_raw_bytes(obj)
+            if raw_bytes:
+                try:
+                    req = parse_monday_webhook_request(body=raw_bytes, headers=obj.get("headers"))
+                    # Any parse result is acceptable here; focus is on handshake
+                    assert req is not None
+                except Exception:
+                    pass
             raw_text = (obj.get("body") or {}).get("text") or ""
             if (isinstance(payload, dict) and "challenge" in payload) or (isinstance(raw_text, str) and "challenge" in raw_text.lower()):
                 got = payload

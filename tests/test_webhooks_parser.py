@@ -22,6 +22,7 @@ from monpy.oo.webhooks.events import (
     SubitemColumnChangeEvent,
 )
 from monpy.oo.webhooks.signature import verify_signature
+from monpy.helpers import parse_monday_webhook_request
 from monpy.oo.enums import WebhookEventType
 
 
@@ -191,5 +192,30 @@ def test_verify_signature():
     assert verify_signature(secret=secret, body=body, header_signature=mac) is True
     assert verify_signature(secret=secret, body=body, header_signature="deadbeef") is False
     assert verify_signature(secret=secret, body=body, header_signature=None) is False
+
+
+def test_helper_parse_wrapper_and_typed_fields():
+    body = {
+        "event": {
+            "type": "change_column_value",
+            "boardId": 1,
+            "pulseId": 2,
+            "columnId": "date",
+            "columnType": "date",
+            "value": {"date": "2025-01-31", "time": "13:45"},
+            "triggerTime": "2025-01-31T13:45:00Z",
+        }
+    }
+    req = parse_monday_webhook_request(body)
+    ev = req.event
+    # Base assertions
+    assert ev.board_id == "1" and ev.item_id == "2"
+    # Typed convenience
+    assert getattr(ev, "trigger_time_datetime", None) is not None
+    if hasattr(ev, "typed_value"):
+        tv = getattr(ev, "typed_value")
+        from datetime import date, datetime
+
+        assert isinstance(tv, (date, datetime))
 
 

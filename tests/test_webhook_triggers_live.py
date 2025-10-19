@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 import time
 import uuid
 from typing import Any, Optional
@@ -11,6 +12,7 @@ import requests
 from monpy import Session
 from monpy.oo.enums import WebhookEventType
 from monpy.oo import parse_webhook
+from monpy.helpers import parse_monday_webhook_request
 from monpy.oo.webhooks.events import (
     ItemCreatedEvent,
     ItemDeletedEvent,
@@ -79,6 +81,25 @@ def _parse_mirror_to_django_like(obj: dict) -> dict:
         return {}
 
 
+def _mirror_raw_bytes(obj: dict) -> bytes:
+    body = obj.get("body") or {}
+    b64_val = body.get("base64")
+    if isinstance(b64_val, str) and b64_val.strip():
+        try:
+            import base64
+
+            return base64.b64decode(b64_val)
+        except Exception:
+            pass
+    text_val = body.get("text")
+    if isinstance(text_val, str):
+        try:
+            return text_val.encode("utf-8", errors="replace")
+        except Exception:
+            return b""
+    return b""
+
+
 def _wait_for_event(mirror_url: str, *, expect_type: str, delays: list[int]) -> Optional[dict]:
     last_obj: Optional[dict] = None
     for d in delays:
@@ -128,6 +149,7 @@ def test_webhook_triggers_oo_end_to_end(client_live, _test_config):
         # Minimal columns to drive changes
         col_text = bd.create_column(title="Text", column_type="text").__dict__["id"]
         col_status = bd.create_column(title="Status", column_type="status").__dict__["id"]
+        col_date = bd.create_column(title="Due", column_type="date").__dict__["id"]
 
         # Register target webhooks (best-effort; some may fail due to permissions)
         desired = [
@@ -172,6 +194,12 @@ def test_webhook_triggers_oo_end_to_end(client_live, _test_config):
         if isinstance(payload, dict) and payload.get("event"):
             ev = parse_webhook(payload)
             assert isinstance(ev, ItemCreatedEvent)
+            # helper wrapper + type coercion (trigger_time)
+            req_created = parse_monday_webhook_request(body=json.dumps(payload))
+            ev_created = req_created.event
+            assert isinstance(ev_created, ItemCreatedEvent)
+            if getattr(ev_created, "trigger_time", None) is not None:
+                assert getattr(ev_created, "trigger_time_datetime", None) is not None
 
         # 2) ITEM_NAME_CHANGE
         item.rename("renamed")
@@ -185,8 +213,41 @@ def test_webhook_triggers_oo_end_to_end(client_live, _test_config):
             item.values.text = "world"
         payload = _wait_for_event(mirror_url, expect_type=WebhookEventType.COLUMN_CHANGE.value, delays=delays)
         if isinstance(payload, dict) and payload.get("event"):
+            # Validate both raw OO parser and helper wrapper
             ev = parse_webhook(payload)
             assert isinstance(ev, ColumnChangeEvent)
+            req = parse_monday_webhook_request(body=json.dumps(payload))
+            ev2 = req.event
+            assert isinstance(ev2, ColumnChangeEvent)
+            # typed value available and matches new text
+            tv = getattr(ev2, "typed_value", None)
+            assert isinstance(tv, str)
+            assert tv == "world"
+
+        # 3b) COLUMN_CHANGE (Status)
+        with sess.transaction():
+            item.values.status = "Done"
+        payload = _wait_for_event(mirror_url, expect_type=WebhookEventType.COLUMN_CHANGE.value, delays=delays)
+        if isinstance(payload, dict) and payload.get("event"):
+            req = parse_monday_webhook_request(body=json.dumps(payload))
+            evs = req.event
+            if isinstance(evs, ColumnChangeEvent) and getattr(evs, "column_id", None) is not None:
+                # typed value should be a dict with label/index
+                tvs = getattr(evs, "typed_value", None)
+                assert isinstance(tvs, dict)
+                assert "label" in tvs
+                assert "index" in tvs
+
+        # 3c) COLUMN_CHANGE (Date)
+        with sess.transaction():
+            item.values.due = date(2025, 1, 31)
+        payload = _wait_for_event(mirror_url, expect_type=WebhookEventType.COLUMN_CHANGE.value, delays=delays)
+        if isinstance(payload, dict) and payload.get("event"):
+            req = parse_monday_webhook_request(body=json.dumps(payload))
+            evd = req.event
+            if isinstance(evd, ColumnChangeEvent) and getattr(evd, "column_id", None) is not None:
+                tvd = getattr(evd, "typed_value", None)
+                assert isinstance(tvd, date)
 
         # 4) COLUMN_CREATED
         _ = bd.create_column(title="Extra", column_type="text")
@@ -315,6 +376,12 @@ def test_webhook_triggers_oo_end_to_end(client_live, _test_config):
         if isinstance(payload, dict) and payload.get("event"):
             ev = parse_webhook(payload)
             assert isinstance(ev, ItemDeletedEvent)
+            # helper wrapper + type coercion (trigger_time)
+            req_deleted = parse_monday_webhook_request(body=json.dumps(payload))
+            ev_deleted = req_deleted.event
+            assert isinstance(ev_deleted, ItemDeletedEvent)
+            if getattr(ev_deleted, "trigger_time", None) is not None:
+                assert getattr(ev_deleted, "trigger_time_datetime", None) is not None
 
     finally:
         # Cleanup webhooks first (best-effort)
