@@ -77,55 +77,57 @@ class ColumnSpec:
 
 
 class StatusColor(Enum):
-    """Enum representing monday.com status column color codes."""
-    TROLLEY_GREY = 1
-    ORANGE = 2
-    GREEN_SHADOW = 3
-    RED_SHADOW = 4
-    BLUE_LINKS = 5
-    PURPLE = 6
-    GRASS_GREEN = 7
-    BRIGHT_BLUE = 8
-    MUSTARD = 9
-    YELLOW = 10
-    SOFT_BLACK = 11
-    DARK_RED = 12
-    DARK_PINK = 13
-    LIGHT_PINK = 14
-    DARK_PURPLE = 15
-    LIME_GREEN = 16
-    TURQUOISE = 17
-    # Note: "trolley-grey" also exists as 18; renamed here to avoid name collision.
-    TROLLEY_GREY_ALT = 18
-    BROWN = 19
-    DARK_ORANGE = 20
-    SUNSET = 21
-    BUBBLE = 22
-    PEACH = 23
-    BERRY = 24
-    WINTER = 25
-    RIVER = 26
-    NAVY = 27
-    AUSTRALIA = 28
-    INDIGO = 29
-    DARK_INDIGO = 30
-    PECAN = 31
-    LIGHT_MAGIC = 32
-    SKY = 33
-    COLD_BLUE = 34
-    KIDS = 35
-    PURPLE_GRAY = 36
-    CORONA = 37
-    SAIL = 38
-    OLD_ROSE = 39
-    EDEN = 40
+    """Enum representing monday.com status column color names (canonical enum values for the API)."""
+    AMERICAN_GRAY = "american_gray"
+    AQUAMARINE = "aquamarine"
+    BERRY = "berry"
+    BLACKISH = "blackish"
+    BRIGHT_BLUE = "bright_blue"
+    BRIGHT_GREEN = "bright_green"
+    BROWN = "brown"
+    BUBBLE = "bubble"
+    CHILI_BLUE = "chili_blue"
+    COFFEE = "coffee"
+    DARK_BLUE = "dark_blue"
+    DARK_INDIGO = "dark_indigo"
+    DARK_ORANGE = "dark_orange"
+    DARK_PURPLE = "dark_purple"
+    DARK_RED = "dark_red"
+    DONE_GREEN = "done_green"
+    EGG_YOLK = "egg_yolk"
+    EXPLOSIVE = "explosive"
+    GRASS_GREEN = "grass_green"
+    INDIGO = "indigo"
+    LAVENDER = "lavender"
+    LILAC = "lilac"
+    LIPSTICK = "lipstick"
+    NAVY = "navy"
+    ORCHID = "orchid"
+    PEACH = "peach"
+    PECAN = "pecan"
+    PURPLE = "purple"
+    RIVER = "river"
+    ROYAL = "royal"
+    SALADISH = "saladish"
+    SKY = "sky"
+    SOFIA_PINK = "sofia_pink"
+    STEEL = "steel"
+    STUCK_RED = "stuck_red"
+    SUNSET = "sunset"
+    TAN = "tan"
+    TEAL = "teal"
+    WINTER = "winter"
+    WORKING_ORANGE = "working_orange"
 
 
 # It appears the API is highly inconsistent with color validation during creation.
-# Use a small set of stringified integer codes that are most likely to be stable.
-SAFE_STATUS_COLOR_INDEXES: List[int] = [
-    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 16, 17,
+# Use a small set of safe canonical color names that are most likely to be stable.
+SAFE_STATUS_COLOR_NAMES: List[str] = [
+    "stuck_red", "working_orange", "done_green", "sky", "navy", "purple", "indigo", "dark_blue",
 ]
+
+# Full set of accepted canonical color names for validation
+_ALL_STATUS_COLOR_NAMES: set[str] = {c.value for c in StatusColor}
 
 
 @dataclass
@@ -143,23 +145,19 @@ class StatusDefaults:
 
         Note on colors
         --------------
-        The monday.com API is notoriously inconsistent in validating status colors
-        during column creation. To ensure the highest chance of success, this method
-        ignores the specific color chosen in the `StatusOption` and instead cycles
-        through a small list of known-safe, stringified integer color codes.
-
-        The primary goal is to successfully create the column with the correct labels;
-        colors are a secondary attribute that can be updated later if needed.
+        The monday.com API expects canonical color enum names (like "sky", "done_green", etc).
+        When you provide a StatusOption with a specific color via the StatusColor enum,
+        that color is used directly. If a color is missing or invalid, a deterministic
+        fallback from SAFE_STATUS_COLOR_NAMES is applied.
         """
         labels: List[Dict[str, Any]] = []
         for idx, opt in enumerate(self.options):
-            # Honor the enum color selection by default; API inconsistencies are handled later
-            # by creation fallbacks when building candidates.
-            color_code: int = int(getattr(opt.color, "value", SAFE_STATUS_COLOR_INDEXES[idx % len(SAFE_STATUS_COLOR_INDEXES)]))
+            # Get the color value from the enum; it's now a string like "sky" or "done_green"
+            color_value = opt.color.value if isinstance(opt.color, StatusColor) else str(opt.color)
             labels.append({
                 "index": idx,
                 "label": str(opt.label),
-                "color": color_code,
+                "color": color_value,
             })
         return {"labels": labels}
 
@@ -416,6 +414,13 @@ def _resolve_or_create_columns(client: MondayClient, board_id: str, specs: Seque
                         return [{"index": i, "label": l} for (i, l) in items]
 
                     def _ensure_label_colors(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+                        """Normalize label entries and preserve provided colors when valid.
+
+                        Rules:
+                        - Keep caller-provided color when present and valid; accept keys: "color", "color_name", "colorName".
+                        - Coerce enum objects (StatusColor) to their value.
+                        - Fallback to a deterministic safe color cycle when color is missing/invalid.
+                        """
                         out: List[Dict[str, Any]] = []
                         for pos, e in enumerate(entries):
                             idx_val = e.get("index")
@@ -424,14 +429,31 @@ def _resolve_or_create_columns(client: MondayClient, board_id: str, specs: Seque
                             except Exception:
                                 idx_int = pos
 
-                            # Always use safe deterministic integer color index to avoid API inconsistencies
-                            color_code = SAFE_STATUS_COLOR_INDEXES[idx_int % len(SAFE_STATUS_COLOR_INDEXES)]
+                            # Determine color preserving user intent when possible
+                            raw_color = (
+                                e.get("color")
+                                or e.get("color_name")
+                                or e.get("colorName")
+                            )
+                            if isinstance(raw_color, StatusColor):
+                                color_str = raw_color.value
+                            elif raw_color is not None:
+                                try:
+                                    color_str = str(raw_color).strip().lower()
+                                except Exception:
+                                    color_str = ""
+                            else:
+                                color_str = ""
+
+                            if color_str not in _ALL_STATUS_COLOR_NAMES:
+                                # Fallback to deterministic safe palette
+                                color_str = SAFE_STATUS_COLOR_NAMES[idx_int % len(SAFE_STATUS_COLOR_NAMES)]
 
                             out.append({
-                                **e,
+                                **{k: v for k, v in e.items() if k not in ("color_name", "colorName")},
                                 "index": idx_int,
                                 "label": str(e.get("label", "")),
-                                "color": color_code,
+                                "color": color_str,
                             })
                         return out
 
@@ -451,16 +473,33 @@ def _resolve_or_create_columns(client: MondayClient, board_id: str, specs: Seque
                     else:
                         entries = []
 
-                    # Single attempt: send labels with safe integer color codes
-                    created = client.create_column(
-                        board_id,
-                        title=cs.title,
-                        column_type=t,
-                        defaults={"labels": entries} if entries else None,
-                        description=cs.description,
-                    )
-                    cid = str(created.get("id"))
-                    title_to_id[cs.title] = cid
+                    # Prepare candidate defaults. The API expects canonical color enum names.
+                    candidates: List[Dict[str, Any]] = []
+                    if entries:
+                        # 1) labels as array of objects with color as canonical color name (primary)
+                        candidates.append({"labels": entries})
+                    # Try candidates until one succeeds
+                    last_exc: Optional[Exception] = None
+                    for cand in candidates or [{}]:
+                        try:
+                            created = client.create_column(
+                                board_id,
+                                title=cs.title,
+                                column_type=t,
+                                defaults=cand if cand else None,
+                                description=cs.description,
+                            )
+                            cid = str(created.get("id"))
+                            title_to_id[cs.title] = cid
+                            break
+                        except MondayAPIError as exc:
+                            last_exc = exc
+                            continue
+                    else:
+                        # If all candidates failed, raise the last error
+                        if last_exc:
+                            raise last_exc
+                        raise MondayAPIError("Failed to create status column with provided defaults")
                 else:
                     # Non-status: straight pass-through
                     created = client.create_column(

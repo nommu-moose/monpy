@@ -171,9 +171,9 @@ def test_upsert_creates_status_with_labels_defaults(client_live):
     # Use distinct labels and colors via the OO helpers
     random.seed(int(ts))
     options = [
-        StatusOption(label="Queued", color=StatusColor.ORANGE),
-        StatusOption(label="Under way", color=StatusColor.TURQUOISE),
-        StatusOption(label="Shipped", color=StatusColor.NAVY),
+        StatusOption(label="Queued", color=StatusColor.BRIGHT_BLUE),
+        StatusOption(label="Under way", color=StatusColor.AQUAMARINE),
+        StatusOption(label="Shipped", color=StatusColor.DONE_GREEN),
     ]
     random.shuffle(options)
     sd = StatusDefaults(options=options)
@@ -225,6 +225,20 @@ def test_upsert_creates_status_with_labels_defaults(client_live):
         # Labels have both "label" and "name" fields; "label" is the internal key, "name" is display
         label_texts = {lbl.get("label") or lbl.get("name") for lbl in labels if isinstance(lbl, dict)}
         assert {"Queued", "Under way", "Shipped"}.issubset(label_texts)
+        # Verify colors preserved for provided options. Some API versions return a numeric color index
+        # instead of the canonical color string. Accept either the exact string or a numeric index.
+        expected_label_to_color = {opt.label: opt.color.value for opt in options}
+        for lbl in labels:
+            if not isinstance(lbl, dict):
+                continue
+            name = lbl.get("label") or lbl.get("name")
+            if name in expected_label_to_color:
+                actual_color = lbl.get("color") or lbl.get("color_name") or lbl.get("colorName")
+                if isinstance(actual_color, str):
+                    assert actual_color == expected_label_to_color[name]
+                else:
+                    # Numeric index form – cannot reliably map back to canonical names here
+                    assert isinstance(actual_color, int)
 
     finally:
         if ws_id:
