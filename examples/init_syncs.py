@@ -170,63 +170,6 @@ def batch_upsert_items():
     pass
 
 
-# Candidates Board
-# Location (text field, uneditable)
-# Assigned (people column)
-# Status (status field with options: Prospect, Applied, Interview, Offer, Hired, Rejected, Withdrawn)
-# TEID (text field)
-# Person (formatted_name field)
-# First Name (text field)
-# Last Name (text field)
-# Phone (phone field)
-# Email (email field)
-# GDPR Date (date field)
-# Prof. Field (tags field)
-# Skills (text field, read only)
-# Candidate Category (choice field with options: Unclarified, Active, Passive, Internal, Alumni, Blacklisted)
-# Contact for Jobs (connect field)
-# GER (status field with options: Unclarified::grey, A1-A2/Basic::red, B1/Intermediate::yellow, B2/Advanced::dark green, C1-C2/Native::green)
-# ENG (status field with options: Unclarified::grey, A1-A2/Basic::red, B1/Intermediate::yellow, B2/Advanced::dark green, C1-C2/Native::green)
-# BUL (status field with options: Unclarified::grey, A1-A2/Basic::red, B1/Intermediate::yellow, B2/Advanced::dark green, C1-C2/Native::green)
-# HUN (status field with options: Unclarified::grey, A1-A2/Basic::red, B1/Intermediate::yellow, B2/Advanced::dark green, C1-C2/Native::green)
-# Files (file field)
-
-
-# Contacts Board
-# First Name (text field)
-# Last Name (text field)
-# Phone (phone field)
-# Email (email field)
-# Contact At (connect field)
-
-
-# Archived Candidates Board (empty, no columns, just to move the items and keep updates on them which will hold email conversations per person)
-
-
-# Organisations Board
-# Type (status field with options: Prospective::purple, Client::green, Client and Partner::baby blue, Partner::orange, Internal::dark blue, Unclarified::grey, Unsuccessful::red)
-# Location (text field, uneditable, just a comma separated list of city + postcode)
-# Assigned (people column)
-# Contacts (connect boards column)
-
-
-# Jobs Board
-# Opening (name/title of item field) ["opening": str]
-# TEID (text field) ["teid": str]
-# Mode (status field with options: Onsite::red, Hybrid::orange, Remote::green, Unclarified::grey) ["mode": int]
-# Hours (status field with options: Full time::blue, part time::orange, Minijob::red, Flexible::green, Unclarified::grey) ["hours": int]
-# Prof. Field (tags field)
-# Skills (text field)
-# Client (connect boards field)
-# Candidates (connect boards field)
-# Pipelines (connect boards field)
-# Location (text field, read only)
-# GER (status field with options: Unclarified::grey, A1-A2/Basic::red, B1/Intermediate::yellow, B2/Advanced::dark green, C1-C2/Native::green)
-# ENG (status field with options: Unclarified::grey, A1-A2/Basic::red, B1/Intermediate::yellow, B2/Advanced::dark green, C1-C2/Native::green)
-# BUL (status field with options: Unclarified::grey, A1-A2/Basic::red, B1/Intermediate::yellow, B2/Advanced::dark green, C1-C2/Native::green)
-# HUN (status field with options: Unclarified::grey, A1-A2/Basic::red, B1/Intermediate::yellow, B2/Advanced::dark green, C1-C2/Native::green)
-
-
 def delete_item_by_id(session: Session, item_id: str | int) -> None:
     """
     Permanently delete an item by ID using the OO layer.
@@ -239,3 +182,57 @@ def delete_item_by_id(session: Session, item_id: str | int) -> None:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+"""
+Please output a wrapper for the upsert item helper function
+it should take a set of params representing an item
+params and monday output should follow this structure:
+
+workspace_id (str), board_id(str), and item_id(str) should all be optional and possible to be passed None
+
+if none is passed, please ensure that the field is still passed/created and just empty if it doesn't exist
+
+### People Board
+
+- Person ("name" param, str, mapping to text field on monday)
+- Phone ("phone" param, str, mapping to text field on monday)
+- Email ("email" param, str, mapping to email field on monday)
+- Locations ("locations" param, str, mapping to text field on monday)
+- Assigned ("assigned" param, list of strings representing IDs of accounts on Monday, mapping to people column on monday)
+- Status ("status" param, integer index, mapping to status field with options: Unclarified::grey, Applied::gold, Prospect::yellow, Qualified::light purple, CV Sent::purple, Shortlisted::deep purple, Interview::light blue, Offered::teal, Accepted::green, Hired::dark green, Rejected::red)
+- Link ("link" param, str, mapping to a clickable link field in monday)
+- TEID ("teid" param, str, mapping to text field in monday)
+- GDPR Date ("gdpr" param, date or datetime in python, mapping to date field in monday)
+- Prof. Field ("profession" param, list of strings, mapping to tags field in monday)
+- Skills ("skills" param, str, mapping to text field in monday)
+- Candidate Category ("candcat" param, integer index mapping to status field with options: Keyselling::green, Unclarified::grey, Reselling::purple, Good::blue, Acceptable::orange, Poor::red)
+- JobContact ("jobcontact" param, str representing job item ID, mapping to connect field)
+- OrgContact ("orgcontact" param, str representing org item ID, mapping to connect field)
+- Lang ("langs" param, str, mapping to text field on monday)
+- Files (no data passed to upsert, just must ensure this column exists)
+- Last Updated (no data passed to upsert, just must ensure this column exists)
+
+add it to an upsert_examples.py inside the examples folder, so I can use it myself and ensure it works
+
+### Organisations Board
+
+- Organisation ("name" param, str, mapping to text field on monday)
+- Type (status field with options: Prospective::purple, Client::green, Client and Partner::baby blue, Partner::orange, Internal::dark blue, Unclarified::grey, Unsuccessful::red)
+- Locations ("locations" param, str, mapping to text field on monday)
+- Assigned ("assigned" param, list of strings representing IDs of accounts on Monday, mapping to people column on monday)
+- Contacts ("contacts" param, list of strings representing person item IDs, mapping to connect field)
+- TEID ("teid" param, str, mapping to text field in monday)
+
+### Jobs Board
+
+- Opening ("name" param, str, mapping to text field on monday)
+- TEID ("teid" param, str, mapping to text field in monday)
+- Mode ("mode" param, integer index, mapping to status field with options: Onsite::red, Hybrid::orange, Remote::green, Unclarified::grey)
+- Hours ("hours" param, integer index, mapping to status field with options: Full time::blue, part time::orange, Minijob::red, Flexible::green, Unclarified::grey)
+- Prof. Field ("profession" param, list of strings, mapping to tags field in monday)
+- Skills ("skills" param, str, mapping to text field in monday)
+- Client ("client" param, list of strings representing org item IDs, mapping to connect field)
+- Candidates ("candidates" param, list of strings representing person item IDs, mapping to connect field)
+- Locations ("locations" param, str, mapping to text field on monday)
+- Lang ("langs" param, str, mapping to text field on monday)
+"""
