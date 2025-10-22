@@ -35,7 +35,7 @@ def test_parse_create_item_event():
             "pulseName": "New item",
             "groupId": "topics",
             "groupName": "Topics",
-            "type": "create_item",
+            "type": "item_created",
             "triggerTime": "2025-01-01T00:00:00.000Z",
             "subscriptionId": 999,
             "triggerUuid": "abc-def",
@@ -78,7 +78,7 @@ def test_parse_column_change_event():
 def test_parse_item_deleted_event():
     body = {
         "event": {
-            "type": "delete_item",
+            "type": "item_deleted",
             "boardId": 1,
             "pulseId": 2,
             "userId": 3,
@@ -91,8 +91,8 @@ def test_parse_item_deleted_event():
 
 
 def test_parse_item_archived_and_restored_events():
-    archived = {"event": {"type": "archive_item", "boardId": 10, "pulseId": 20}}
-    restored = {"event": {"type": "unarchive_item", "boardId": 11, "pulseId": 21}}
+    archived = {"event": {"type": "item_archived", "boardId": 10, "pulseId": 20}}
+    restored = {"event": {"type": "item_restored", "boardId": 11, "pulseId": 21}}
 
     ev_a = parse_webhook(archived)
     ev_r = parse_webhook(restored)
@@ -106,7 +106,7 @@ def test_parse_item_archived_and_restored_events():
 def test_parse_item_moved_event():
     body = {
         "event": {
-            "type": "move_item_to_group",
+            "type": "item_moved_to_group",
             "boardId": 5,
             "pulseId": 6,
             "toGroupId": "new_group",
@@ -119,9 +119,9 @@ def test_parse_item_moved_event():
 
 
 def test_parse_update_events_created_changed_deleted():
-    created = {"event": {"type": "create_update", "boardId": 1, "pulseId": 2, "updateId": 100}}
-    changed = {"event": {"type": "change_update", "boardId": 1, "pulseId": 2, "updateId": 101}}
-    deleted = {"event": {"type": "delete_update", "boardId": 1, "pulseId": 2, "updateId": 102}}
+    created = {"event": {"type": "update_created", "boardId": 1, "pulseId": 2, "updateId": 100}}
+    changed = {"event": {"type": "edit_update", "boardId": 1, "pulseId": 2, "updateId": 101}}
+    deleted = {"event": {"type": "update_deleted", "boardId": 1, "pulseId": 2, "updateId": 102}}
 
     ev_c = parse_webhook(created)
     ev_u = parse_webhook(changed)
@@ -147,7 +147,7 @@ def test_alias_and_fallbacks_for_known_types():
 
 
 def test_parse_item_name_change_event():
-    body = {"event": {"type": "change_name", "boardId": 123, "pulseId": 456, "itemName": "Renamed"}}
+    body = {"event": {"type": "item_name_changed", "boardId": 123, "pulseId": 456, "itemName": "Renamed"}}
     ev = parse_webhook(body)
     assert isinstance(ev, ItemNameChangedEvent)
     assert ev.type == WebhookEventType.ITEM_NAME_CHANGE
@@ -164,13 +164,13 @@ def test_parse_column_created_event():
 
 def test_parse_subitem_events_created_and_column_change():
     # subitem created uses entityId in some payloads
-    created = {"event": {"type": "create_subitem", "boardId": 1, "entityId": 222}}
+    created = {"event": {"type": "subitem_created", "boardId": 1, "entityId": 222}}
     ev_c = parse_webhook(created)
     assert isinstance(ev_c, SubitemCreatedEvent)
     assert ev_c.type == WebhookEventType.SUBITEM_CREATED and ev_c.item_id == "222"
 
     # subitem column change also maps to base event — just ensure type detection
-    chg = {"event": {"type": "change_subitem_column_value", "boardId": 2, "entityId": 333, "columnId": "status", "columnType": "status"}}
+    chg = {"event": {"type": "subitem_column_value_changed", "boardId": 2, "entityId": 333, "columnId": "status", "columnType": "status"}}
     ev_s = parse_webhook(chg)
     assert isinstance(ev_s, SubitemColumnChangeEvent)
     assert ev_s.type == WebhookEventType.SUBITEM_COLUMN_CHANGE and ev_s.item_id == "333" and ev_s.column_id == "status"

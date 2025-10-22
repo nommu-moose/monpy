@@ -39,8 +39,11 @@ def _detect_event_type(event: dict) -> WebhookEventType:
     # Normalize known aliases if monday changes naming
     alias = {
         "change_column_values": "change_column_value",
-        "create_pulse": "create_item",
-        "delete_pulse": "delete_item",
+        "create_pulse": "item_created",
+        "delete_pulse": "item_deleted",
+        "change_name": "item_name_changed",
+        "create_subitem": "subitem_created",
+        "create_update": "update_created",
     }.get(t, t)
     try:
         return WebhookEventType(alias)

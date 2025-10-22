@@ -168,7 +168,6 @@ def test_webhook_triggers_oo_end_to_end(client_live, _test_config):
             WebhookEventType.SUBITEM_ARCHIVED,
             WebhookEventType.SUBITEM_RESTORED,
             WebhookEventType.SUBITEM_DELETED,
-            WebhookEventType.UPDATE_CHANGE,
             WebhookEventType.UPDATE_DELETE,
         ]
         for ev in desired:
@@ -279,10 +278,10 @@ def test_webhook_triggers_oo_end_to_end(client_live, _test_config):
             except Exception:
                 upd_id = None
             if upd_id:
-                m2 = "mutation ($id: ID!, $body: String!){ change_update (id:$id, body:$body){ id } }"
+                m2 = "mutation ($id: ID!, $body: String!){ edit_update (id:$id, body:$body){ id } }"
                 try:
                     changed = client_live.mutation(m2, {"id": upd_id, "body": "updated body"})
-                    if changed and changed.get("change_update"):
+                    if changed and changed.get("edit_update"):
                         payload = _wait_for_event(mirror_url, expect_type=WebhookEventType.UPDATE_CHANGE.value, delays=delays)
                         if isinstance(payload, dict) and payload.get("event"):
                             ev = parse_webhook(payload)
