@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import Enum
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Set
 
 from ..client import MondayClient
 from ..exceptions import (
@@ -348,37 +348,121 @@ def _normalize_col_type(t: str) -> str:
     return tt
 
 
-def _resolve_or_create_columns(client: MondayClient, board_id: str, specs: Sequence[ColumnSpec]) -> Tuple[List[ColumnSpec], Dict[str, str]]:
+def _resolve_or_create_columns(
+    client: MondayClient,
+    board_id: str,
+    specs: Sequence[ColumnSpec],
+    *,
+    strict_resolution: bool = True,
+    infer_connect_from_values: bool = True,
+) -> Tuple[List[ColumnSpec], Dict[str, str]]:
     """Ensure columns exist; return updated specs with column_id filled and a title->id map.
 
     The special type "name" is mapped to the implicit Name column id "name" and is not created.
+
+    strict_resolution: when True, resolves by (title, type) and validates provided ids by type.
+    infer_connect_from_values: when True, attempts to infer connect boards defaults from item values.
     """
-    # Prefetch columns map to minimize calls
+    # Prefetch columns metadata to minimize calls and enable compatibility checks
     try:
-        existing = client.get_columns(board_id, fields=("id", "title", "type"))
+        existing = client.get_columns(board_id, fields=("id", "title", "type", "settings", "settings_str"))
     except MondayAPIError:
         existing = []
+
+    # Build fast lookup structures
+    by_title: Dict[str, List[Dict[str, Any]]] = {}
+    for c in existing or []:
+        by_title.setdefault(str(c.get("title")), []).append(c)
+
     title_to_id: Dict[str, str] = {str(c.get("title")): str(c.get("id")) for c in existing or []}
+
+    def _settings_connected_ids(col: Dict[str, Any]) -> Set[str]:
+        ids = col.get("connected_board_ids") or []
+        try:
+            return {str(x) for x in ids}
+        except Exception:
+            return set()
+
+    def _extract_connect_default_ids(d: Optional[Mapping[str, Any]]) -> Set[str]:
+        if not isinstance(d, Mapping):
+            return set()
+        for key in ("boardIds", "board_ids", "boardId", "board_id", "connected_boards"):
+            val = d.get(key)
+            if isinstance(val, (list, tuple)):
+                try:
+                    return {str(int(x)) for x in val}
+                except Exception:
+                    return {str(x) for x in val}
+        return set()
+
+    def _infer_board_ids_from_value(value: Any) -> Set[str]:
+        ids: List[str] = []
+        if value is None:
+            return set()
+        if isinstance(value, (list, tuple)):
+            ids = [str(v) for v in value]
+        else:
+            ids = [str(value)]
+        out: Set[str] = set()
+        for iid in ids:
+            try:
+                itm = client.get_item_values(str(iid), include_board=True, parse_json_values=False)
+                bd = itm.get("board") or {}
+                if bd.get("id") is not None:
+                    out.add(str(bd.get("id")))
+            except Exception:
+                # best-effort
+                continue
+        return out
 
     updated_specs: List[ColumnSpec] = []
     for cs in specs:
         t = _normalize_col_type(cs.type)
         if t in ("name", "title"):
-            # map to implicit name id
             updated_specs.append(ColumnSpec(type="name", title=cs.title or "Name", column_id="name", value=cs.value, defaults=cs.defaults, description=cs.description))
             continue
 
-        # if id provided, validate; else resolve by title; else create
+        # Validate provided id by type when strict
         cid: Optional[str] = None
         if cs.column_id:
             try:
-                col = client.get_column(board_id, cs.column_id, fields=("id", "type", "title"))
-                cid = str(col.get("id"))
+                col = client.get_column(board_id, cs.column_id, fields=("id", "type", "title", "settings", "settings_str"))
+                col_type_norm = _normalize_col_type(str(col.get("type")))
+                if not strict_resolution or col_type_norm == t:
+                    cid = str(col.get("id"))
+                else:
+                    cid = None
             except (ColumnNotFound, MondayAPIError):
                 cid = None
 
+        # Resolve by (title, type) when strict; fallback to legacy title-only when not strict
         if cid is None:
-            cid = title_to_id.get(cs.title)
+            candidates = by_title.get(cs.title, [])
+            chosen: Optional[Dict[str, Any]] = None
+            if candidates:
+                if strict_resolution:
+                    # exact type match first
+                    same_type = [c for c in candidates if _normalize_col_type(str(c.get("type"))) == t]
+                    # For connect boards, prefer compatible settings
+                    if t == "board_relation" and same_type:
+                        wanted: Set[str] = _extract_connect_default_ids(cs.defaults)
+                        if infer_connect_from_values and not wanted:
+                            wanted = _infer_board_ids_from_value(cs.value)
+                        if wanted:
+                            for c in same_type:
+                                have = _settings_connected_ids(c)
+                                if not have or have.issuperset(wanted):
+                                    chosen = c
+                                    break
+                        if chosen is None and same_type:
+                            # no specific requirements; pick the first
+                            chosen = same_type[0]
+                    else:
+                        chosen = same_type[0] if same_type else None
+                if not strict_resolution and not chosen:
+                    chosen = candidates[0]
+            if chosen is not None:
+                cid = str(chosen.get("id"))
 
         if cid is None:
             # create with defaults when provided; normalize well-known schemas and try fallbacks for Status
@@ -386,9 +470,17 @@ def _resolve_or_create_columns(client: MondayClient, board_id: str, specs: Seque
                 defaults_payload: Optional[Dict[str, Any]] = None
                 if isinstance(cs.defaults, Mapping):
                     defaults_payload = dict(cs.defaults)
-                # Status special: build normalized entries and try multiple schema variants
+
+                # Connect boards: infer defaults from values when not provided
+                if t == "board_relation" and (not defaults_payload or not _extract_connect_default_ids(defaults_payload)):
+                    if infer_connect_from_values:
+                        inferred = _infer_board_ids_from_value(cs.value)
+                        if inferred:
+                            defaults_payload = dict(defaults_payload or {})
+                            defaults_payload["boardIds"] = [int(x) if str(x).isdigit() else x for x in inferred]
+
+                # Status special: build normalized entries and try schema variants
                 if t == "status":
-                    # Build entries from provided defaults (labels -> [{index,label,color}]) using robust coercion
                     lbls = (defaults_payload or {}).get("labels") if isinstance(defaults_payload, Mapping) else None
                     if lbls is None and isinstance(defaults_payload, Mapping):
                         try:
@@ -414,13 +506,6 @@ def _resolve_or_create_columns(client: MondayClient, board_id: str, specs: Seque
                         return [{"index": i, "label": l} for (i, l) in items]
 
                     def _ensure_label_colors(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-                        """Normalize label entries and preserve provided colors when valid.
-
-                        Rules:
-                        - Keep caller-provided color when present and valid; accept keys: "color", "color_name", "colorName".
-                        - Coerce enum objects (StatusColor) to their value.
-                        - Fallback to a deterministic safe color cycle when color is missing/invalid.
-                        """
                         out: List[Dict[str, Any]] = []
                         for pos, e in enumerate(entries):
                             idx_val = e.get("index")
@@ -428,8 +513,6 @@ def _resolve_or_create_columns(client: MondayClient, board_id: str, specs: Seque
                                 idx_int = int(idx_val) if idx_val is not None else pos
                             except Exception:
                                 idx_int = pos
-
-                            # Determine color preserving user intent when possible
                             raw_color = (
                                 e.get("color")
                                 or e.get("color_name")
@@ -444,11 +527,8 @@ def _resolve_or_create_columns(client: MondayClient, board_id: str, specs: Seque
                                     color_str = ""
                             else:
                                 color_str = ""
-
                             if color_str not in _ALL_STATUS_COLOR_NAMES:
-                                # Fallback to deterministic safe palette
                                 color_str = SAFE_STATUS_COLOR_NAMES[idx_int % len(SAFE_STATUS_COLOR_NAMES)]
-
                             out.append({
                                 **{k: v for k, v in e.items() if k not in ("color_name", "colorName")},
                                 "index": idx_int,
@@ -473,12 +553,9 @@ def _resolve_or_create_columns(client: MondayClient, board_id: str, specs: Seque
                     else:
                         entries = []
 
-                    # Prepare candidate defaults. The API expects canonical color enum names.
                     candidates: List[Dict[str, Any]] = []
                     if entries:
-                        # 1) labels as array of objects with color as canonical color name (primary)
                         candidates.append({"labels": entries})
-                    # Try candidates until one succeeds
                     last_exc: Optional[Exception] = None
                     for cand in candidates or [{}]:
                         try:
@@ -496,12 +573,10 @@ def _resolve_or_create_columns(client: MondayClient, board_id: str, specs: Seque
                             last_exc = exc
                             continue
                     else:
-                        # If all candidates failed, raise the last error
                         if last_exc:
                             raise last_exc
                         raise MondayAPIError("Failed to create status column with provided defaults")
                 else:
-                    # Non-status: straight pass-through
                     created = client.create_column(
                         board_id,
                         title=cs.title,
@@ -512,7 +587,6 @@ def _resolve_or_create_columns(client: MondayClient, board_id: str, specs: Seque
                     cid = str(created.get("id"))
                     title_to_id[cs.title] = cid
             except MondayAPIError:
-                # Surface the error – caller may retry after fixing prerequisites
                 raise
 
         updated_specs.append(ColumnSpec(type=t, title=cs.title, column_id=cid, value=cs.value, defaults=cs.defaults, description=cs.description))
@@ -532,6 +606,9 @@ def upsert_item(
     columns: Sequence[ColumnSpec],
     group_name: Optional[str] = None,
     safe_updates: bool = True,
+    strict_resolution: bool = True,
+    aggressive_safe_updates: bool = False,
+    on_missing_item: str = "error",  # one of: "error", "create", "skip"
 ) -> Dict[str, Any]:
     """Create or update an item and its surrounding structures.
 
@@ -547,11 +624,46 @@ def upsert_item(
     """
 
     def _execute_once() -> Dict[str, Any]:
+        # Determine operation and target board
         ws_id = _ensure_workspace(client, workspace)
-        bd_id = _ensure_board(client, BoardSpec(name=board.name, id=board.id, board_kind=board.board_kind), workspace_id=ws_id)
+        target_board_id: Optional[str] = None
+        existing_item: Optional[Dict[str, Any]] = None
 
-        # Columns
-        col_specs, title_map = _resolve_or_create_columns(client, bd_id, columns)
+        if item.id:
+            try:
+                existing_item = client.get_item_values(item.id, include_board=True, parse_json_values=False)
+                bd = existing_item.get("board") or {}
+                if bd.get("id") is not None:
+                    target_board_id = str(bd.get("id"))
+            except ItemNotFound:
+                if on_missing_item == "create":
+                    existing_item = None
+                    target_board_id = None
+                elif on_missing_item == "skip":
+                    # no-op, return resolution context
+                    return {
+                        "workspace_id": ws_id,
+                        "board_id": _ensure_board(client, BoardSpec(name=board.name, id=board.id, board_kind=board.board_kind), workspace_id=ws_id),
+                        "item_id": str(item.id),
+                        "column_ids": {},
+                        "result": {},
+                    }
+                else:
+                    # propagate for retry/outer handler
+                    raise
+
+        if not target_board_id:
+            # Ensure board where we will create or where columns reside for creation
+            target_board_id = _ensure_board(client, BoardSpec(name=board.name, id=board.id, board_kind=board.board_kind), workspace_id=ws_id)
+
+        # Ensure columns on the target board
+        col_specs, title_map = _resolve_or_create_columns(
+            client,
+            target_board_id,
+            columns,
+            strict_resolution=strict_resolution,
+            infer_connect_from_values=True,
+        )
 
         # Build values payload and extract item name
         values: Dict[str, Any] = {}
@@ -561,20 +673,20 @@ def upsert_item(
                 if cs.value is not None:
                     item_name = str(cs.value)
                 continue
-            # Default encoding
             encoded_value = _encode_value_for_type(cs.type, cs.value)
-            # Special handling for status: if caller provided an index and we have defaults
-            # with labels, prefer setting by label to avoid index mismatches on creation.
+
+            # Prefer label for status when index provided, using actual column settings if available
             try:
-                if (cs.type or "").lower() == "status" and isinstance(cs.value, Mapping):
-                    if "index" in cs.value and isinstance(cs.defaults, Mapping):
-                        idx_wanted = int(cs.value.get("index"))
+                if (cs.type or "").lower() == "status" and isinstance(cs.value, Mapping) and "index" in cs.value:
+                    idx_wanted = int(cs.value.get("index"))
+                    # 1) from provided defaults
+                    label_from_defaults: Optional[str] = None
+                    if isinstance(cs.defaults, Mapping):
                         lbls = cs.defaults.get("labels")
                         entries: List[Mapping[str, Any]] = []
                         if isinstance(lbls, list):
                             entries = [e for e in lbls if isinstance(e, Mapping)]
                         elif isinstance(lbls, Mapping):
-                            # Convert mapping of {index: label or {label}} into list entries
                             tmp: List[Dict[str, Any]] = []
                             for k, v in lbls.items():
                                 try:
@@ -586,42 +698,79 @@ def upsert_item(
                                 else:
                                     tmp.append({"index": ii, "label": str(v)})
                             entries = tmp
-                        # Find matching label
                         for ent in entries:
                             try:
                                 if int(ent.get("index")) == idx_wanted:
-                                    label_str = str(ent.get("label", ""))
-                                    if label_str:
-                                        encoded_value = {"label": label_str}
+                                    label_from_defaults = str(ent.get("label", "")) or None
                                     break
                             except Exception:
                                 continue
+
+                    # 2) from actual column settings when column_id known
+                    label_from_col: Optional[str] = None
+                    if not label_from_defaults and cs.column_id:
+                        try:
+                            meta = client.get_column(target_board_id, cs.column_id, fields=("id", "settings", "settings_str", "type"))
+                            settings = meta.get("settings", {})
+                            labels = settings.get("labels") or (settings.get("labels_colors", {}) or {}).get("labels")
+                            if isinstance(labels, Mapping):
+                                cand = labels.get(str(idx_wanted)) or labels.get(idx_wanted)  # type: ignore[index]
+                                if isinstance(cand, Mapping):
+                                    label_from_col = str(cand.get("label") or cand.get("name") or "") or None
+                                elif isinstance(cand, str):
+                                    label_from_col = cand or None
+                        except Exception:
+                            pass
+
+                    chosen_label = label_from_defaults or label_from_col
+                    if chosen_label:
+                        encoded_value = {"label": chosen_label}
             except Exception:
-                # best-effort; fall back to default encoding
                 pass
 
             values[cs.column_id or ""] = encoded_value
-        # Drop empties just in case
+
         values = {k: v for k, v in values.items() if k}
 
         # Create or update item
-        if item.id:
-            # If updating, we need the board id – assume this bd_id
+        if existing_item and item.id:
             if safe_updates:
-                client.safe_update_item_values(bd_id, item.id, column_values=values)
+                try:
+                    client.safe_update_item_values(target_board_id, item.id, column_values=values)
+                except MondayAPIError as exc:
+                    if not aggressive_safe_updates:
+                        raise
+                    # Aggressive path: strip any columns explicitly referenced in error_data
+                    try:
+                        errs = getattr(exc, "errors", []) or []
+                        offending: Set[str] = set()
+                        for e in errs:
+                            data = (e.get("extensions") or {}).get("error_data") or {}
+                            cid = data.get("column_id") or data.get("columnId")
+                            if cid:
+                                offending.add(str(cid))
+                        filtered = {k: v for k, v in values.items() if k not in offending}
+                        if filtered:
+                            client.update_item_values(target_board_id, item.id, column_values=filtered)
+                        else:
+                            # nothing left to update; treat as success
+                            pass
+                    except Exception:
+                        # if aggressive handling fails, bubble original
+                        raise
             else:
-                client.update_item_values(bd_id, item.id, column_values=values)
+                client.update_item_values(target_board_id, item.id, column_values=values)
             result = client.get_item_values(item.id, include_board=True)
             iid = str(result.get("id"))
         else:
-            gid = _ensure_group(client, bd_id, group_id=item.group_id, group_name=group_name)
-            created = client.create_item(bd_id, group_id=gid, item_name=item_name, column_values=values)
+            gid = _ensure_group(client, target_board_id, group_id=item.group_id, group_name=group_name)
+            created = client.create_item(target_board_id, group_id=gid, item_name=item_name, column_values=values)
             iid = str(created.get("id"))
             result = client.get_item_values(iid, include_board=True)
 
         return {
             "workspace_id": ws_id,
-            "board_id": bd_id,
+            "board_id": target_board_id,
             "item_id": iid,
             "column_ids": {c.title: c.column_id for c in col_specs},
             "result": result,

@@ -206,13 +206,29 @@ if none is passed, please ensure that the field is still passed/created and just
 - Prof. Field ("profession" param, list of strings, mapping to tags field in monday)
 - Skills ("skills" param, str, mapping to text field in monday)
 - Candidate Category ("candcat" param, integer index mapping to status field with options: Keyselling::green, Unclarified::grey, Reselling::purple, Good::blue, Acceptable::orange, Poor::red)
-- JobContact ("jobcontact" param, str representing job item ID, mapping to connect field)
-- OrgContact ("orgcontact" param, str representing org item ID, mapping to connect field)
+- JobContact ("jobcontact" param, str representing job item ID, mapping to connect field, if empty list then set it as empty, but if None don't set the field)
+- OrgContact ("orgcontact" param, str representing org item ID, mapping to connect field, if empty list then set it as empty, but if None don't set the field)
 - Lang ("langs" param, str, mapping to text field on monday)
 - Files (no data passed to upsert, just must ensure this column exists)
 - Last Updated (no data passed to upsert, just must ensure this column exists)
 
-add it to an upsert_examples.py inside the examples folder, so I can use it myself and ensure it works
+please make it return an object with the same attr names as params that were passed + the suffix _col_id, the attrs then being the column IDs... also give it workspace_id, item_id, and board_id
+
+it should also be given a list of the board IDs required for connect boards, otherwise if None, it will just ignore the creation of that column, plus make no changes to that column at all
+
+add it to an upsert_person_example.py inside the examples folder, so I can use it myself and ensure it works, and include an additional calling function passing the params to it and getting the attrs back to print them
+
+
+
+
+
+Please output a wrapper for the upsert item helper function
+it should take a set of params representing an item
+params and monday output should follow this structure:
+
+workspace_id (str), board_id(str), and item_id(str) should all be optional and possible to be passed None
+
+if none is passed, please ensure that the field is still passed/created and just empty if it doesn't exist
 
 ### Organisations Board
 
@@ -220,8 +236,25 @@ add it to an upsert_examples.py inside the examples folder, so I can use it myse
 - Type (status field with options: Prospective::purple, Client::green, Client and Partner::baby blue, Partner::orange, Internal::dark blue, Unclarified::grey, Unsuccessful::red)
 - Locations ("locations" param, str, mapping to text field on monday)
 - Assigned ("assigned" param, list of strings representing IDs of accounts on Monday, mapping to people column on monday)
-- Contacts ("contacts" param, list of strings representing person item IDs, mapping to connect field)
+- Contacts ("contacts" param, list of strings representing person item IDs, mapping to connect field, if empty list then set it as empty, but if None don't set the field)
 - TEID ("teid" param, str, mapping to text field in monday)
+
+please make it return an object with the same attr names as params that were passed + the suffix _col_id, the attrs then being the column IDs... also give it workspace_id, item_id, and board_id
+
+it should also be given a list of the board IDs required for connect boards, otherwise if None, it will just ignore the creation of that column, plus make no changes to that column at all
+
+add it to an upsert_organisation_example.py inside the examples folder, so I can use it myself and ensure it works, and include an additional calling function passing the params to it and getting the attrs back to print them
+
+
+
+
+Please output a wrapper for the upsert item helper function
+it should take a set of params representing an item
+params and monday output should follow this structure:
+
+workspace_id (str), board_id(str), and item_id(str) should all be optional and possible to be passed None
+
+if none is passed, please ensure that the field is still passed/created and just empty if it doesn't exist
 
 ### Jobs Board
 
@@ -231,8 +264,22 @@ add it to an upsert_examples.py inside the examples folder, so I can use it myse
 - Hours ("hours" param, integer index, mapping to status field with options: Full time::blue, part time::orange, Minijob::red, Flexible::green, Unclarified::grey)
 - Prof. Field ("profession" param, list of strings, mapping to tags field in monday)
 - Skills ("skills" param, str, mapping to text field in monday)
-- Client ("client" param, list of strings representing org item IDs, mapping to connect field)
-- Candidates ("candidates" param, list of strings representing person item IDs, mapping to connect field)
+- Client ("client" param, list of strings representing org item IDs, mapping to connect field, if empty list then set it as empty, but if None don't set the field)
+- Candidates ("candidates" param, list of strings representing person item IDs, mapping to connect field, if empty list then set it as empty, but if None don't set the field)
 - Locations ("locations" param, str, mapping to text field on monday)
 - Lang ("langs" param, str, mapping to text field on monday)
+
+please make it return an object with the same attr names as params that were passed + the suffix _col_id, the attrs then being the column IDs... also give it workspace_id, item_id, and board_id
+
+it should also be given a list of the board IDs required for connect boards, otherwise if None, it will just ignore the creation of that column, plus make no changes to that column at all
+
+add it to an upsert_job_example.py inside the examples folder, so I can use it myself and ensure it works, and include an additional calling function passing the params to it and getting the attrs back to print them
+
+
+### Pipelines Subitems on People Board
+- Pipeline ("name" param, str, mapping to text field on monday)
+- Status ("status" param, integer index, mapping to status field with options: Unclarified::grey, Applied::gold, Prospect::yellow, Qualified::light purple, CV Sent::purple, Shortlisted::deep purple, Interview::light blue, Offered::teal, Accepted::green, Hired::dark green, Rejected::red)
+- Skills ("skills" param, str, mapping to text field in monday)
+- Notes ("notes" param, str, mapping to text field on monday)
+- Files (no data passed to upsert, just must ensure this column exists)
 """
