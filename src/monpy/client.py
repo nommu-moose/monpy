@@ -65,7 +65,7 @@ class MondayClient:
     Lightweight synchronous client for the monday.com GraphQL API.
 
     Workspace helpers are fully implemented; board / column helpers have now
-    been added following the same minimalist, “only-fetch-what-you-need”
+    been added following the same minimalist, "only-fetch-what-you-need"
     philosophy.
 
     Parameters
@@ -73,7 +73,7 @@ class MondayClient:
     token
         **User** API token (not OAuth).
     api_version
-        Version string as required by monday (default: “2025-10”).
+        Version string as required by monday (default: "2025-10").
     max_retries, backoff
         Simple exponential back-off for handling 429 rate limits.
     endpoint, files_endpoint
@@ -97,8 +97,8 @@ class MondayClient:
     _DEFAULT_BOARD_FIELDS = (
         "id",
         "name",
-        "board_kind",      # “public”, “private”, “share”
-        "state",           # “active”, “archived”, “deleted”
+        "board_kind",      # "public", "private", "share"
+        "state",           # "active", "archived", "deleted"
         "workspace_id",
         "updated_at"
     )
@@ -120,8 +120,9 @@ class MondayClient:
     _DEFAULT_SUBITEM_FIELDS: tuple[str, ...] = ("id", "name", "state", "updated_at")
     _DEFAULT_GROUP_FIELDS: tuple[str, ...] = ("id", "title", "archived")
     _DEFAULT_USER_FIELDS: tuple[str, ...] = ("id", "name", "email")
-    _BOARD_RELATION_FRAGMENT = "... on BoardRelationColumn { allowed_board_ids }"
-    _DEFAULT_WEBHOOK_FIELDS: tuple[str, ...] = ("id",)
+    _DEFAULT_UPDATE_FIELDS: tuple[str, ...] = ("id",)
+    _DEFAULT_WEBHOOK_FIELDS: tuple[str, ...] = ("id", "event", "config", "board_id")
+    _DEFAULT_WORKSPACE_FIELDS: tuple[str, ...] = ("id", "name", "kind", "description")
     _DEFAULT_DOC_FIELDS = (
         "id",  # doc id (≠ object_id!)
         "name",
@@ -224,7 +225,7 @@ class MondayClient:
                         pass
                 raise NetworkError("Network error") from exc
 
-            # Gracefully handle 429 “too many requests”
+            # Gracefully handle 429 "too many requests"
             if response.status_code == 429 and attempt < self.max_retries:
                 time.sleep(self.backoff * 2**attempt)
                 continue
@@ -332,7 +333,7 @@ class MondayClient:
 
     @staticmethod
     def _error_messages_lower(errors: Optional[List[Dict[str, Any]]]) -> List[str]:
-        """Return error messages lower‑cased for simple substring checks."""
+        """Return error messages lower-cased for simple substring checks."""
         return [str((err or {}).get("message", "")).lower() for err in (errors or [])]
 
     @staticmethod
@@ -535,7 +536,7 @@ class MondayClient:
         name
             Human-readable name (required by monday).
         kind
-            Visibility – one of: “open”, “closed”, “private”.
+            Visibility – one of: "open", "closed", "private".
         description
             Optional description shown in the monday UI.
         """
@@ -599,9 +600,9 @@ class MondayClient:
 
         Notes
         -----
-        monday.com does not offer a reversible “archive” call for workspaces.
+        monday.com does not offer a reversible "archive" call for workspaces.
         This mutation moves the whole workspace (and its boards, items, etc.)
-        to the account’s trash where it can be restored for 30 days.
+        to the account's trash where it can be restored for 30 days.
         """
         m = """
         mutation ($id: ID!) {
@@ -708,7 +709,7 @@ class MondayClient:
         self,
         *,
         name: str,
-        board_kind: str = "public",          # “public”, “private”, “share”
+        board_kind: str = "public",          # "public", "private", "share"
         workspace_id: Optional[str] = None,
         template_id: Optional[str] = None,
         fields: Optional[List[str] | tuple[str, ...]] = None,
@@ -717,7 +718,7 @@ class MondayClient:
         Create a board and return its metadata.
 
         If *workspace_id* is omitted, monday will place the board in the
-        account’s default workspace.
+        account's default workspace.
         """
         field_str = self._fields_to_str(fields, self._DEFAULT_BOARD_FIELDS)
         m = f"""
@@ -751,7 +752,7 @@ class MondayClient:
         """
         Archive a board.
 
-        monday.com does not offer a generic “delete” for boards – “archive”
+        monday.com does not offer a generic "delete" for boards – "archive"
         is as close as it gets via the public API.
         """
         m = """
@@ -832,33 +833,52 @@ class MondayClient:
         """
         field_str = self._fields_to_str(fields, self._DEFAULT_WEBHOOK_FIELDS)
         # Accept Enum for stronger typing; fall back to string value
+        event_str: str
         try:
             # late import to avoid circular import at module import time
             from .oo.enums import WebhookEventType as _WebhookEventType  # type: ignore
+
             if isinstance(event, _WebhookEventType):  # type: ignore[arg-type]
-                event = event.value
-        except Exception:
+                event_str = event.value
+            else:
+                event_str = str(event)
+        except ImportError:
             # Best-effort: if import fails, assume user passed str
-            pass
+            event_str = str(event)
+
         cfg_decl = ", $cfg: JSON" if config is not None else ""
         cfg_arg = ", config: $cfg" if config is not None else ""
         m = f"""
-        mutation ($board: ID!, $url: String!, $event: WebhookEventType!{cfg_decl}) {{
-          create_webhook(board_id: $board, url: $url, event: $event{cfg_arg}) {{
+        mutation ($board: ID!, $url: String!{cfg_decl}) {{
+          create_webhook(board_id: $board, url: $url, event: {event_str}{cfg_arg}) {{
             {field_str}
           }}
         }}
         """
-        vars: Dict[str, Any] = {"board": board_id, "url": url, "event": event}
+        vars: Dict[str, Any] = {"board": board_id, "url": url}
         if config is not None:
             vars["cfg"] = json.dumps(config)
         return self.mutation(m, vars)["create_webhook"]
 
-    def delete_webhook(self, webhook_id: str) -> None:
+    def unregister_webhook(self, webhook_id: str) -> Dict[str, Any]:
         """
         Delete a webhook by its ID.
         """
         self.mutation("mutation ($id: ID!){ delete_webhook(id:$id){ id } }", {"id": webhook_id})
+
+    def list_webhooks(self, board_id: str, *, fields: Optional[list[str] | tuple[str, ...]] = None) -> list[dict]:
+        """
+        List webhooks registered on a board.
+        """
+        field_str = self._fields_to_str(fields, self._DEFAULT_WEBHOOK_FIELDS)
+        q = f"""
+        query ($board: ID!) {{
+          webhooks(board_id: $board) {{
+            {field_str}
+          }}
+        }}
+        """
+        return self.query(q, {"board": board_id})["webhooks"]
 
     # 6. Users and board subscribers -----------------------------------
 
@@ -1029,7 +1049,7 @@ class MondayClient:
         workspaces = self.list_workspaces(limit=workspace_limit)
         ws = next((w for w in workspaces if w["name"] == workspace_name), None)
         if ws is None:
-            raise ValueError(f'Workspace “{workspace_name}” not found')
+            raise ValueError(f'Workspace "{workspace_name}" not found')
         workspace_id = ws["id"]
 
         # 2. Board ➜ ID  (filter by workspace to be safe)
@@ -1041,7 +1061,7 @@ class MondayClient:
         board = next((b for b in boards if b["name"] == board_name), None)
         if board is None:
             raise ValueError(
-                f'Board “{board_name}” not found inside workspace “{workspace_name}”'
+                f'Board "{board_name}" not found inside workspace "{workspace_name}"'
             )
         board_id = board["id"]
 
@@ -1060,7 +1080,7 @@ class MondayClient:
 
         if missing:
             raise ValueError(
-                f'Board “{board_name}” is missing columns: {", ".join(missing)}'
+                f'Board "{board_name}" is missing columns: {", ".join(missing)}'
             )
 
         return board_id, col_id_map
@@ -1340,7 +1360,7 @@ class MondayClient:
 
         Mirror columns
         --------------
-        A mirror column’s ``referenced_column_id`` tells you which source column
+        A mirror column's ``referenced_column_id`` tells you which source column
         it reflects. **This linkage is immutable through the public API** – you
         can *read* it but you cannot change it programmatically. To re-wire a
         mirror you must either adjust it manually in the Monday UI or delete and
@@ -1558,7 +1578,7 @@ class MondayClient:
                     try:
                         cv["value"] = json.loads(raw)
                     except ValueError:
-                        # leave the original string if it isn’t valid JSON
+                        # leave the original string if it isn't valid JSON
                         pass
 
             # Best-effort normalization: some API versions may not populate
@@ -2064,7 +2084,7 @@ class MondayClient:
         -----
         • *column_values* must be **raw** Python dict – it will be JSON-encoded
           inside the mutation call.
-        • If you *just* need the new item’s ID, leave *return_fields* at
+        • If you *just* need the new item's ID, leave *return_fields* at
           ``None`` (the default → ``("id",)``).
         """
         self._coerce_text_values(board_id, column_values)
@@ -2100,7 +2120,7 @@ class MondayClient:
         """
         Permanently delete an item.
 
-        The public ``delete_item`` mutation moves the item to the account’s
+        The public ``delete_item`` mutation moves the item to the account's
         recycle bin where it can be restored within 30 days from the UI.
         There is no *archive* equivalent for items – use this call when you
         truly want it gone.
@@ -2266,7 +2286,7 @@ class MondayClient:
         value: Any,
     ) -> None:
         """
-        Shorthand wrapper around monday’s ``change_column_value`` mutation.
+        Shorthand wrapper around monday's ``change_column_value`` mutation.
         """
         m = """
         mutation ($board: ID!, $item: ID!, $col: String!, $val: JSON!) {
@@ -2442,7 +2462,7 @@ class MondayClient:
         linked_item_ids: List[str] | List[int],
     ) -> None:
         """
-        Convenience helper for “Connect boards” columns.
+        Convenience helper for "Connect boards" columns.
 
         The supplied *linked_item_ids* **replace** any existing links.
         """
@@ -2519,7 +2539,7 @@ class MondayClient:
     ) -> None:
         """
         Identical to *set_connected_items* but defaults to resolving the
-        hidden “sub-tasks” board automatically.
+        hidden "sub-tasks" board automatically.
         """
         if board_id is None:
             board_id = self._get_board_id_for_subitem(subitem_id)
@@ -2574,7 +2594,7 @@ class MondayClient:
         top_level_fields: Optional[List[str] | Tuple[str, ...]] = None,
     ) -> Dict[str, Any]:
         """
-        Retrieve a sub-item’s column values (mirrors :py:meth:`get_item_values`).
+        Retrieve a sub-item's column values (mirrors :py:meth:`get_item_values`).
 
         *include_board* adds the hidden sub-items board metadata.
         *include_parent* adds ``parent_item { id }`` so you can link back up.
@@ -2666,7 +2686,7 @@ class MondayClient:
         """
         Batch-update **many** columns on a sub-item.
 
-        *board_id* is the ID of the hidden “sub-items board”; if omitted the
+        *board_id* is the ID of the hidden "sub-items board"; if omitted the
         helper will perform one extra lookup to resolve it automatically.
         """
         if not column_values:
@@ -2782,7 +2802,7 @@ class MondayClient:
             Accepts either the real *doc ID* or the *object_id* stored in files.
         by_object_id
             If ``True`` (default) treat *doc_or_object_id* as **object_id**,
-            otherwise as the doc’s real ID.
+            otherwise as the doc's real ID.
         include_blocks
             Set ``True`` to add ``blocks{…}`` to the selection set.
         block_limit, block_page
@@ -2915,7 +2935,7 @@ class MondayClient:
                     parts.append(content.strip())
                     continue
 
-            # ── 2. Parse Quill “deltaFormat” ops (rich-text) ───────────────
+            # ── 2. Parse Quill "deltaFormat" ops (rich-text) ───────────────
             for op in content.get("deltaFormat", []):
                 txt = op.get("insert")
                 if isinstance(txt, str):
@@ -3117,7 +3137,7 @@ class MondayClient:
         """
         Upload *file_obj* to a File column (API‑version 2025‑04).
 
-        Returns the new asset’s `{ id, url, public_url }`.
+        Returns the new asset's `{ id, url, public_url }`.
         """
         # 1 . GraphQL — **no comments allowed!**
         mutation = (

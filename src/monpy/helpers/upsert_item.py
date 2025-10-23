@@ -827,6 +827,234 @@ def upsert_item_from_dicts(
     return upsert_item(client, workspace=ws, board=bd, item=it, columns=cols, group_name=group_name, safe_updates=safe_updates)
 
 
+def batch_upsert_items(
+    client: MondayClient,
+    *,
+    workspace: WorkspaceSpec,
+    board: BoardSpec,
+    items_with_columns: Sequence[Tuple[ItemSpec, Sequence[ColumnSpec]]],
+    group_name: Optional[str] = None,
+    safe_updates: bool = True,
+    strict_resolution: bool = True,
+    aggressive_safe_updates: bool = False,
+    on_missing_item: str = "create",  # one of: "error", "create", "skip"
+) -> List[Dict[str, Any]]:
+    """Create or update multiple items and their surrounding structures in batch.
+
+    Behavior
+    --------
+    - Ensures the workspace and board exist (creates if missing).
+    - Ensures all requested columns for all items exist with provided defaults.
+    - Items without an id are created in a batch operation.
+    - Items with an id are updated individually.
+    - On missing-entity errors (workspace, board, column, item), re-resolves and retries once.
+
+    Returns a list of dicts including entity ids and the item metadata for each item:
+        { "workspace_id": str, "board_id": str, "item_id": str, "column_ids": {title: id}, "result": {...} }
+    """
+
+    def _execute_once() -> List[Dict[str, Any]]:
+        ws_id = _ensure_workspace(client, workspace)
+        board_id = _ensure_board(client, board, workspace_id=ws_id)
+
+        all_column_specs = [cs for _, columns in items_with_columns for cs in columns]
+        # Deduplicate column specs by title to avoid creating same column multiple times
+        unique_column_specs: Dict[str, ColumnSpec] = {}
+        for cs in all_column_specs:
+            if cs.title not in unique_column_specs:
+                unique_column_specs[cs.title] = cs
+        
+        resolved_cols, title_map = _resolve_or_create_columns(
+            client,
+            board_id,
+            list(unique_column_specs.values()),
+            strict_resolution=strict_resolution
+        )
+        resolved_cols_map = {c.title: c for c in resolved_cols}
+
+        items_to_create = []
+        items_to_update = []
+
+        for item_spec, column_specs in items_with_columns:
+            if item_spec.id:
+                try:
+                    # check if item exists
+                    client.get_item_values(item_spec.id)
+                    items_to_update.append((item_spec, column_specs))
+                except ItemNotFound:
+                    if on_missing_item == "create":
+                        item_spec.id = None # Treat as new item
+                        items_to_create.append((item_spec, column_specs))
+                    elif on_missing_item == "skip":
+                        continue
+                    else:
+                        raise
+            else:
+                items_to_create.append((item_spec, column_specs))
+
+        all_results = []
+
+        # Batch Create Items
+        if items_to_create:
+            group_id = _ensure_group(client, board_id, group_name=group_name)
+            create_payloads = []
+            for item_spec, column_specs in items_to_create:
+                values = {}
+                item_name = item_spec.name
+                for cs in column_specs:
+                    resolved_cs = resolved_cols_map.get(cs.title)
+                    if not resolved_cs or not resolved_cs.column_id:
+                        continue
+                    
+                    if resolved_cs.type == "name":
+                        if cs.value is not None:
+                            item_name = str(cs.value)
+                        continue
+
+                    values[resolved_cs.column_id] = _encode_value_for_type(resolved_cs.type, cs.value)
+                create_payloads.append({"name": item_name, "values": values})
+
+            created_items = client.create_items(board_id, group_id=group_id, items=create_payloads, return_fields=["id", "name", "column_values { id text }"])
+            for item_data in created_items:
+                all_results.append({
+                    "workspace_id": ws_id,
+                    "board_id": board_id,
+                    "item_id": item_data["id"],
+                    "column_ids": title_map,
+                    "result": item_data,
+                })
+
+        # Individually Update Items
+        for item_spec, column_specs in items_to_update:
+            values = {}
+            # Handle name update: name from ItemSpec is the fallback, ColumnSpec with type 'name' takes precedence.
+            name_to_set = item_spec.name
+            other_columns = []
+            for cs in column_specs:
+                if cs.type == 'name':
+                    if cs.value is not None:
+                        name_to_set = str(cs.value)
+                else:
+                    other_columns.append(cs)
+
+            if name_to_set:
+                values["name"] = name_to_set
+            
+            for cs in other_columns:
+                resolved_cs = resolved_cols_map.get(cs.title)
+                if not resolved_cs or not resolved_cs.column_id:
+                    continue
+                values[resolved_cs.column_id] = _encode_value_for_type(resolved_cs.type, cs.value)
+
+            if not values:
+                item_data = client.get_item_values(item_spec.id)
+                all_results.append({
+                    "workspace_id": ws_id,
+                    "board_id": board_id,
+                    "item_id": item_spec.id,
+                    "column_ids": title_map,
+                    "result": item_data,
+                })
+                continue
+
+            if safe_updates:
+                try:
+                    client.safe_update_item_values(board_id, item_spec.id, column_values=values)
+                except MondayAPIError as exc:
+                    if not aggressive_safe_updates:
+                        raise
+                    
+                    errs = getattr(exc, "errors", []) or []
+                    offending: Set[str] = set()
+                    for e in errs:
+                        data = (e.get("extensions") or {}).get("error_data") or {}
+                        cid = data.get("column_id") or data.get("columnId")
+                        if cid:
+                            offending.add(str(cid))
+                    filtered = {k: v for k, v in values.items() if k not in offending}
+                    if filtered:
+                        client.update_item_values(board_id, item_spec.id, column_values=filtered)
+
+            else:
+                client.update_item_values(board_id, item_spec.id, column_values=values)
+
+            item_data = client.get_item_values(item_spec.id)
+            all_results.append({
+                "workspace_id": ws_id,
+                "board_id": board_id,
+                "item_id": item_spec.id,
+                "column_ids": title_map,
+                "result": item_data,
+            })
+
+        return all_results
+
+    try:
+        return _execute_once()
+    except (WorkspaceNotFound, BoardNotFound, ColumnNotFound, ItemNotFound, MondayAPIError):
+        # Recalibrate structures and retry once
+        return _execute_once()
+
+
+def batch_upsert_items_from_dicts(
+    client: MondayClient,
+    *,
+    workspace_name: str,
+    board_name: str,
+    items_data: Sequence[Mapping[str, Any]],
+    workspace_id: Optional[str] = None,
+    board_id: Optional[str] = None,
+    workspace_kind: str = "open",
+    board_kind: str = "public",
+    group_name: Optional[str] = None,
+    safe_updates: bool = True,
+) -> List[Dict[str, Any]]:
+    """Convenience wrapper for batch_upsert_items that accepts simple dicts.
+    
+    Each entry in items_data should have keys:
+      - item_name (str) or a column spec with type="name"
+      - columns (list of dicts), each with type, title, value
+      - item_id (optional), group_id (optional)
+    """
+    ws = WorkspaceSpec(name=workspace_name, id=workspace_id, kind=workspace_kind)
+    bd = BoardSpec(name=board_name, id=board_id, board_kind=board_kind)
+    
+    items_with_columns: List[Tuple[ItemSpec, List[ColumnSpec]]] = []
+
+    for item_d in items_data:
+        columns_data = item_d.get("columns", [])
+        if not isinstance(columns_data, list):
+            columns_data = []
+
+        cols: List[ColumnSpec] = []
+        inferred_name: Optional[str] = None
+        for d in columns_data:
+            ctype = str(d.get("type") or "").strip()
+            title = str(d.get("title") or "").strip() or ("Name" if ctype.lower() in ("name", "title") else "")
+            cid = d.get("column_id") or d.get("id")
+            val = d.get("value")
+            defs = d.get("defaults") if isinstance(d.get("defaults"), Mapping) else None
+            desc = d.get("description") if isinstance(d.get("description"), str) else None
+            if ctype.lower() in ("name", "title") and val is not None:
+                inferred_name = str(val)
+            cols.append(ColumnSpec(type=ctype, title=title, column_id=str(cid) if cid else None, value=val, defaults=defs, description=desc))
+
+        item_name = item_d.get("item_name") or inferred_name or ""
+        item_id = item_d.get("item_id")
+        group_id = item_d.get("group_id")
+        it = ItemSpec(name=str(item_name), id=str(item_id) if item_id else None, group_id=str(group_id) if group_id else None)
+        items_with_columns.append((it, cols))
+
+    return batch_upsert_items(
+        client,
+        workspace=ws,
+        board=bd,
+        items_with_columns=items_with_columns,
+        group_name=group_name,
+        safe_updates=safe_updates,
+    )
+
+
 __all__ = [
     "WorkspaceSpec",
     "BoardSpec",
@@ -834,6 +1062,8 @@ __all__ = [
     "ColumnSpec",
     "upsert_item",
     "upsert_item_from_dicts",
+    "batch_upsert_items",
+    "batch_upsert_items_from_dicts",
 ]
 
 

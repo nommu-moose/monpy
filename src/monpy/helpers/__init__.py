@@ -9,6 +9,8 @@ from .upsert_item import (
     WorkspaceSpec,
     upsert_item,
     upsert_item_from_dicts,
+    batch_upsert_items,
+    batch_upsert_items_from_dicts,
 )
 from .webhook import (
     MondayWebhookRequest,
@@ -31,6 +33,8 @@ __all__ = [
     "StatusDefaults",
     "upsert_item",
     "upsert_item_from_dicts",
+    "batch_upsert_items",
+    "batch_upsert_items_from_dicts",
     # webhook helper
     "MondayWebhookRequest",
     "parse_monday_webhook_request",

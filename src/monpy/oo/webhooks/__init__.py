@@ -31,6 +31,7 @@ from .events import (
 )
 from .parser import parse_webhook
 from .signature import verify_signature
+from .webhook import Webhook
 
 __all__ = [
     "WebhookEvent",
@@ -53,6 +54,7 @@ __all__ = [
     "SubitemColumnChangeEvent",
     "parse_webhook",
     "verify_signature",
+    "Webhook",
 ]
 
 

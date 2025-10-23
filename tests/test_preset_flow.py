@@ -122,7 +122,7 @@ def test_preset_oo(client_live, _test_config):
         receive_url = f"{base}/hooks/{path_key}/"
     try:
         if receive_url:
-            bd1.register_webhook(url=receive_url, event="item_created")
+            bd1.register_webhook(url=receive_url, event="create_item")
     except MondayAPIError:
         pass
 
@@ -254,7 +254,7 @@ def test_preset_client(client_live, _test_config):
 
     # Best-effort webhook (may not be permitted)
     try:
-        client_live.create_webhook(board_a_id, url="https://example.com/monpy-preset", event="item_created")
+        client_live.create_webhook(board_a_id, url="https://example.com/monpy-preset", event="create_item")
     except MondayAPIError:
         pass
 

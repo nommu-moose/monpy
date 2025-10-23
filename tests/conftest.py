@@ -7,6 +7,78 @@ from monpy import MondayClient
 from monpy.oo.session import Session
 from monpy.exceptions import FeatureNotSupported
 import uuid
+from typing import NamedTuple
+import time
+
+
+class WebhookReceiver(NamedTuple):
+    base_url: str
+    path_key: str
+    receive_url: str
+    mirror_url: str
+
+    def wait_for_event(self, *, expect_type: str, delays: list[int] | None = None) -> dict | None:
+        """Poll the mirror URL until an event of `expect_type` is seen.
+
+        Returns the parsed JSON body of the webhook payload, or the last seen object
+        if the expected event type is not found after all delays.
+        """
+        delays = delays or [2, 3, 5, 8, 13]
+        for d in delays:
+            time.sleep(d)
+            try:
+                resp = requests.get(self.mirror_url, timeout=10)
+            except requests.RequestException:
+                continue
+            if resp.status_code == 404:
+                continue
+            try:
+                obj = resp.json()
+            except ValueError:
+                continue
+            
+            body_bytes = b""
+            body_b64 = (obj.get("body") or {}).get("base64")
+            if isinstance(body_b64, str):
+                try:
+                    import base64
+                    body_bytes = base64.b64decode(body_b64)
+                except Exception:
+                    pass
+            
+            payload: dict | None = None
+            if body_bytes:
+                try:
+                    payload = json.loads(body_bytes)
+                except (ValueError, TypeError):
+                    pass
+            
+            if isinstance(payload, dict):
+                if "challenge" in payload and expect_type == "":
+                    return payload
+                if isinstance(payload.get("event"), dict):
+                    ev_type = str((payload.get("event") or {}).get("type") or "")
+                    if ev_type == expect_type:
+                        return payload
+        return None
+
+
+@pytest.fixture(scope="function")
+def webhook_receiver(_test_config: dict) -> WebhookReceiver:
+    """Fixture to generate a unique webhook URL for a test function."""
+    base_url_raw = _test_config.get("remote_test_site") or _test_config.get("REMOTE_TEST_SITE")
+    if not base_url_raw:
+        pytest.skip("Webhook tests require 'remote_test_site' in tests/config.json")
+    
+    base_url = str(base_url_raw).rstrip("/")
+    path_key = f"pytest-wh-{uuid.uuid4().hex[:10]}"
+    
+    return WebhookReceiver(
+        base_url=base_url,
+        path_key=path_key,
+        receive_url=f"{base_url}/hooks/{path_key}/",
+        mirror_url=f"{base_url}/hooks/{path_key}/mirror/",
+    )
 
 
 def _load_config() -> dict:
@@ -198,6 +270,7 @@ def live_env(client_live, _test_config):
         "bd1": bd1,
         "bd2": bd2,
         "cols": cols,
+        "webhook_url_base": _test_config.get("remote_test_site")
     }
 
     try:

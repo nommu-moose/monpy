@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
+import json
+import sys
+from pathlib import Path
 
 from monpy.client import MondayClient
 from monpy.helpers import (
@@ -15,6 +18,29 @@ from monpy.helpers import (
     WorkspaceSpec,
     upsert_item,
 )
+from monpy.oo import Session
+from monpy.oo.enums import WebhookEventType
+
+
+def _load_config() -> Dict[str, Any]:
+    """Load config from tests/config.json file (ignored by git)."""
+    cfg = Path(__file__).resolve().parents[1] / "tests" / "config.json"
+    if cfg.exists():
+        try:
+            data = json.loads(cfg.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _build_client_from_config() -> MondayClient | None:
+    """Build MondayClient using API token from tests/config.json. Returns None if unavailable."""
+    config = _load_config()
+    token = config.get("MONDAY_API_TOKEN") or config.get("token")
+    if not token:
+        return None
+    return MondayClient(token=token)
 
 
 def _build_people_status_defaults() -> Mapping[str, Any]:
@@ -129,6 +155,7 @@ def upsert_person(
     connect_board_ids: Optional[Sequence[str | int]] = None,
     # Update behavior
     safe_updates: bool = True,
+    webhook_url: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Wrapper for item upsert on a People board.
 
@@ -140,6 +167,9 @@ def upsert_person(
       If the corresponding value param is None, the column is not modified; if it is an empty
       list, existing links are cleared; if it is a single string, it is treated as one item id.
     - Files and Last Updated columns are ensured to exist but are not modified.
+    - Webhooks: if webhook_url is provided, a webhook for column changes will
+      be registered on the board. Note that running this multiple times with a
+      different URL will create multiple webhooks.
     - Returns a dict with `workspace_id`, `board_id`, `item_id`, and `{param}_col_id` entries.
     """
 
@@ -220,6 +250,14 @@ def upsert_person(
         "item_id": out.get("item_id"),
     }
 
+    board_id = out.get("board_id")
+    if board_id and webhook_url:
+        session = Session(client)
+        board = session.board(board_id)
+        hook_data = board.register_webhook(url=webhook_url, event=WebhookEventType.COLUMN_CHANGE)
+        if hook_data and "id" in hook_data:
+            result["webhook_id"] = str(hook_data["id"])
+
     param_to_title: List[tuple[str, str]] = [
         ("name", "Person"),
         ("phone", "Phone"),
@@ -261,14 +299,20 @@ def example_call() -> None:
     Set MONDAY_TOKEN in your environment before running, then:
         python -m examples.upsert_person_example
     """
-    import os
-
-    token = os.environ.get("MONDAY_TOKEN", "")
-    if not token:
-        print("Please export MONDAY_TOKEN first.")
+    client = _build_client_from_config()
+    if not client:
+        print("No tests/config.json token found; skipping live call.")
         return
 
-    client = MondayClient(token)
+    config = _load_config()
+    webhook_url_base = (config.get("live_env") or {}).get("webhook_url_base")
+    webhook_url = None
+    if webhook_url_base:
+        import uuid
+
+        webhook_url = f"{webhook_url_base}/person/{uuid.uuid4()}"
+    else:
+        print("No webhook_url_base found in config; skipping webhook registration.")
 
     attrs = upsert_person(
         client,
@@ -297,6 +341,7 @@ def example_call() -> None:
         langs="EN, FR",
         connect_board_ids=None,  # set e.g. ["987654321"] to enable Job/Org contacts
         safe_updates=True,
+        webhook_url=webhook_url,
     )
 
     # Print returned IDs for quick inspection

@@ -6,6 +6,7 @@ from typing import Callable, Iterable, Iterator, List, Optional, Tuple
 from .base import BaseModel
 from ..exceptions import FeatureNotSupported
 from .column import Column, ColumnCollection
+from .webhooks import Webhook
 
 
 @dataclass
@@ -197,6 +198,21 @@ class Board(BaseModel):
 
     def unregister_webhook(self, webhook_id: str) -> None:
         """Delete a webhook by id."""
-        self._session.client.delete_webhook(webhook_id)
+        self._session.client.unregister_webhook(webhook_id)
+
+    def list_webhooks(self) -> list[Webhook]:
+        """List webhooks registered on this board."""
+        raw_webhooks = self._session.client.list_webhooks(self.id)
+        webhooks = []
+        for w in raw_webhooks:
+            hook = Webhook(
+                id=str(w["id"]),
+                board_id=str(w.get("board_id") or self.id),
+                event=w.get("event"),
+                config=w.get("config"),
+            )
+            hook._session = self._session
+            webhooks.append(hook)
+        return webhooks
 
 

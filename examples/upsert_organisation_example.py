@@ -22,7 +22,9 @@ from monpy.helpers import (  # noqa: E402
     WorkspaceSpec,
     upsert_item,
 )
-from inventory_usage import _build_client_from_config  # noqa: E402
+from inventory_usage import _build_client_from_config, _load_config  # noqa: E402
+from monpy.oo import Session
+from monpy.oo.enums import WebhookEventType
 
 
 def _organisation_status_defaults() -> Mapping[str, Any]:
@@ -99,6 +101,7 @@ def upsert_organisation_item(
     group_id: Optional[str] = None,
     group_name: Optional[str] = None,
     safe_updates: bool = True,
+    webhook_url: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Upsert an Organisation item and return IDs including column ids per provided params.
 
@@ -107,6 +110,9 @@ def upsert_organisation_item(
         list is provided and contacts_board_ids are given, the column is ensured and set empty.
       - assigned: if None, not changed; if provided (including empty list), it is set.
       - workspace_id/board_id/item_id can be None; missing entities will be created.
+      - Webhooks: if webhook_url is provided, a webhook for column changes will
+        be registered on the board. Note that running this multiple times with a
+        different URL will create multiple webhooks.
     """
     # Specs for workspace and board
     ws = WorkspaceSpec(name=workspace_name, id=workspace_id, kind=workspace_kind)
@@ -177,6 +183,14 @@ def upsert_organisation_item(
         "item_id": out.get("item_id"),
     }
 
+    board_id = out.get("board_id")
+    if board_id and webhook_url:
+        session = Session(client)
+        board = session.board(board_id)
+        hook_data = board.register_webhook(url=webhook_url, event=WebhookEventType.COLUMN_CHANGE)
+        if hook_data and "id" in hook_data:
+            result["webhook_id"] = str(hook_data["id"])
+
     # Map input param names to their column titles
     param_to_title: List[Tuple[str, str]] = [
         ("name", "Organisation"),
@@ -212,6 +226,16 @@ def example_call() -> int:
         print("No tests/config.json token found; skipping live call.")
         return 0
 
+    config = _load_config()
+    webhook_url_base = (config.get("live_env") or {}).get("webhook_url_base")
+    webhook_url = None
+    if webhook_url_base:
+        import uuid
+
+        webhook_url = f"{webhook_url_base}/org/{uuid.uuid4()}"
+    else:
+        print("No webhook_url_base found in config; skipping webhook registration.")
+
     # Adjust names as desired; if the workspace/board do not exist, they will be created
     out = upsert_organisation_item(
         client,
@@ -231,6 +255,7 @@ def example_call() -> int:
         contacts=None,
         teid="ORG-123",
         group_name="grp1",
+        webhook_url=webhook_url,
     )
 
     print("workspace_id:", out.get("workspace_id"))

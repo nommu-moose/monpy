@@ -21,6 +21,8 @@ from monpy.helpers import (  # noqa: E402
     WorkspaceSpec,
     upsert_item,
 )
+from monpy.oo import Session
+from monpy.oo.enums import WebhookEventType
 
 
 def _load_config() -> Dict[str, Any]:
@@ -95,6 +97,7 @@ def upsert_job_item(
     # Additional knobs
     group_name: Optional[str] = None,
     safe_updates: bool = True,
+    webhook_url: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Upsert a "Jobs Board" item with the required columns.
@@ -105,6 +108,9 @@ def upsert_job_item(
       - If the corresponding value is None → do not set that column
       - If the corresponding value is [] → set the column to empty
     - Tags (profession): expects a list of strings representing tag IDs; non-numeric entries are ignored.
+    - Webhooks: if webhook_url is provided, a webhook for column changes will
+      be registered on the board. Note that running this multiple times with a
+      different URL will create multiple webhooks.
     - Returns column IDs keyed by "<param>_col_id" for the columns that were created/updated,
       plus entity ids: workspace_id, board_id, item_id.
     """
@@ -190,6 +196,14 @@ def upsert_job_item(
         "item_id": res.get("item_id"),
     }
 
+    board_id = res.get("board_id")
+    if board_id and webhook_url:
+        session = Session(monday_client)
+        board = session.board(board_id)
+        hook_data = board.register_webhook(url=webhook_url, event=WebhookEventType.COLUMN_CHANGE)
+        if hook_data and "id" in hook_data:
+            returned["webhook_id"] = str(hook_data["id"])
+
     mapping = [
         ("name", "Opening"),
         ("teid", "TEID"),
@@ -224,6 +238,16 @@ def main() -> int:
         print("No tests/config.json token found. Please add your MONDAY_API_TOKEN to run this example.")
         return 1
 
+    config = _load_config()
+    webhook_url_base = (config.get("live_env") or {}).get("webhook_url_base")
+    webhook_url = None
+    if webhook_url_base:
+        import uuid
+
+        webhook_url = f"{webhook_url_base}/job/{uuid.uuid4()}"
+    else:
+        print("No webhook_url_base found in config; skipping webhook registration.")
+
     result = upsert_job_item(
         client,
         workspace_name="Recruiting",
@@ -247,6 +271,7 @@ def main() -> int:
         connect_board_ids=["123456789", "987654321"],
         group_name="Open Roles",
         safe_updates=True,
+        webhook_url=webhook_url,
     )
 
     print("Upsert completed. IDs:")

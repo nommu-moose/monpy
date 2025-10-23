@@ -45,11 +45,11 @@ class ColumnType(str, Enum):
 
 # Webhook events exposed by monday.com's GraphQL API (WebhookEventType)
 # The list is not exhaustive; names map to official enum values where known.
-class WebhookEventType(str, Enum):
+class WebhookEventType(Enum):
     UNKNOWN = "unknown"
 
     # Item-level changes
-    ITEM_CREATED = "item_created"
+    ITEM_CREATED = "create_item"
     ITEM_DELETED = "item_deleted"
     ITEM_ARCHIVED = "item_archived"
     ITEM_RESTORED = "item_restored"
