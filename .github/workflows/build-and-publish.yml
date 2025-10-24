@@ -3,6 +3,8 @@ name: Build and Publish Binary Distribution
 on:
   release:
     types: [published] # Triggers when you create a new release
+  
+  workflow_dispatch: # Allows you to run this workflow manually from the Actions tab
 
 jobs:
   build-and-publish:
