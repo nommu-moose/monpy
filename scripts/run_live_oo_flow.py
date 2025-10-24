@@ -24,9 +24,9 @@ from monpy.oo.file_asset import (  # noqa: E402
     list_files_from_column,
     download_files_from_column,
 )
-from monpy.oo.enums import ColumnType  # noqa: E402
+from monpy.oo import ColumnType  # noqa: E402
 from monpy.oo.columns import ConnectBoardsDefaults  # noqa: E402
-from monpy.oo.enums import WebhookEventType  # noqa: E402
+from monpy.oo import WebhookEventType  # noqa: E402
 
 
 def read_tests_config() -> dict:

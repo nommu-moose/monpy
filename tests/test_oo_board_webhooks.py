@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from monpy.oo.enums import WebhookEventType
+from monpy.oo import WebhookEventType
 
 
 @pytest.fixture(scope="module")

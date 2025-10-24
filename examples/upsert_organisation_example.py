@@ -24,7 +24,7 @@ from monpy.helpers import (  # noqa: E402
 )
 from inventory_usage import _build_client_from_config, _load_config  # noqa: E402
 from monpy.oo import Session
-from monpy.oo.enums import WebhookEventType
+from monpy.oo import WebhookEventType
 
 
 def _organisation_status_defaults() -> Mapping[str, Any]:

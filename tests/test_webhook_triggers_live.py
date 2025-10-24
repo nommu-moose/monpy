@@ -9,8 +9,9 @@ from typing import Any, Optional
 import pytest
 import requests
 
-from monpy import Session
-from monpy.oo.enums import WebhookEventType
+from monpy.client import MondayClient
+from monpy.oo import Session, Board
+from monpy.oo import WebhookEventType
 from monpy.oo import parse_webhook
 from monpy.helpers import parse_monday_webhook_request
 from monpy.oo.webhooks.events import (

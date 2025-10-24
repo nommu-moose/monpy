@@ -19,7 +19,7 @@ import base64  # noqa: E402
 import requests  # noqa: E402
 from monpy import MondayClient, Session  # noqa: E402
 from monpy.exceptions import MondayAPIError  # noqa: E402
-from monpy.oo.enums import WebhookEventType  # noqa: E402
+from monpy.oo import WebhookEventType  # noqa: E402
 
 
 def _read_tests_config() -> dict:

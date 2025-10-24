@@ -5,8 +5,6 @@ from datetime import date
 import pytest
 
 from monpy import Session
-from monpy.oo.enums import WebhookEventType
-import uuid
 from monpy.exceptions import MondayAPIError, FeatureNotSupported
 from monpy.oo.doc import Doc
 from monpy.oo.file_asset import (
@@ -14,6 +12,8 @@ from monpy.oo.file_asset import (
     list_files_from_column,
     download_files_from_column,
 )
+from monpy.oo import WebhookEventType
+import uuid
 
 
 @pytest.mark.live

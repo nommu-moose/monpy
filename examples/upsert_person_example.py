@@ -19,7 +19,7 @@ from monpy.helpers import (
     upsert_item,
 )
 from monpy.oo import Session
-from monpy.oo.enums import WebhookEventType
+from monpy.oo import WebhookEventType
 
 
 def _load_config() -> Dict[str, Any]:

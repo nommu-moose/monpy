@@ -17,7 +17,7 @@ if str(SRC) not in sys.path:
 from monpy import MondayClient  # noqa: E402
 from monpy.exceptions import FeatureNotSupported, MondayAPIError  # noqa: E402
 from monpy.oo import Session  # noqa: E402
-from monpy.oo.enums import BoardKind, ColumnType  # noqa: E402
+from monpy.oo import BoardKind, ColumnType  # noqa: E402
 from monpy.oo.columns.defaults import ConnectBoardsDefaults  # noqa: E402
 
 
