@@ -28,28 +28,13 @@ jobs:
         python -m pip install --upgrade pip
         pip install cython setuptools py-obfuscate
 
-    - name: Prepare compiled source
+    - name: Prepare Obfuscated Source
       working-directory: ./direct-repo
       run: |
-        # 1. Obfuscate source code into a temporary directory
+        # 1. Obfuscate source code. We will not compile it here.
+        # The user's machine will compile it upon installation.
         cp -r src/ obfuscated_src/
         py-obfuscate --in-place --remove-docstrings obfuscated_src/ || echo "Obfuscation failed, continuing without it."
-        
-        # 2. Compile the obfuscated code
-        # Temporarily replace src with the obfuscated version to run setup.py
-        mv src src_original
-        mv obfuscated_src src
-        
-        python setup.py build_ext --inplace
-        
-        # 3. Clean up source files, leaving only compiled binaries, __init__.py, and type hints
-        find src -type f \( -name "*.py" ! -name "__init__.py" \) -delete
-        find src -type f -name "*.c" -delete
-        find src -type f -name "*.pyc" -delete
-
-        # 4. Move the result to a new directory and restore original source
-        mv src compiled_src
-        mv src_original src
 
     - name: Publish to Binary Repo
       run: |
@@ -67,10 +52,10 @@ jobs:
         # Clear old files from the binary repo
         git rm -rf ./* || true
         
-        # Copy the compiled source tree and project files, preserving the src layout
-        mkdir -p src
-        cp -r ../direct-repo/compiled_src/monpy ./src/
+        # Copy the full source distribution structure (obfuscated)
+        cp -r ../direct-repo/obfuscated_src/* ./src/
         cp ../direct-repo/pyproject.toml .
+        cp ../direct-repo/setup.py .
         cp ../direct-repo/README.md .
         cp ../direct-repo/LICENSE .
 
