@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling>=1.25"]
+requires = ["hatchling>=1.25", "cython", "setuptools", "py-obfuscate"]
 build-backend = "hatchling.build"
 
 [project]
@@ -69,6 +69,9 @@ dependencies = [
 dependencies = [
   "ruff>=0.4",
   "mypy>=1.10",
+  "cython",
+  "setuptools",
+  "py-obfuscate",
 ]
 
 [tool.hatch.envs.dev.scripts]

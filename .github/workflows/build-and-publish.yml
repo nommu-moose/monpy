@@ -1,0 +1,82 @@
+name: Build and Publish Binary Distribution
+
+on:
+  release:
+    types: [published] # Triggers when you create a new release
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Required to push to the binary repo
+
+    steps:
+    - name: Checkout Direct Repo
+      uses: actions/checkout@v4
+      with:
+        path: direct-repo
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install build dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install cython setuptools py-obfuscate
+
+    - name: Prepare compiled source
+      working-directory: ./direct-repo
+      run: |
+        # 1. Obfuscate source code into a temporary directory
+        cp -r src/ obfuscated_src/
+        py-obfuscate --in-place --remove-docstrings obfuscated_src/ || echo "Obfuscation failed, continuing without it."
+        
+        # 2. Compile the obfuscated code
+        # Temporarily replace src with the obfuscated version to run setup.py
+        mv src src_original
+        mv obfuscated_src src
+        
+        python setup.py build_ext --inplace
+        
+        # 3. Clean up source files, leaving only compiled binaries and type hints
+        find src -type f -name "*.py" -delete
+        find src -type f -name "*.c" -delete
+        find src -type f -name "*.pyc" -delete
+
+        # 4. Move the result to a new directory and restore original source
+        mv src compiled_src
+        mv src_original src
+
+    - name: Checkout Binary Repo
+      uses: actions/checkout@v4
+      with:
+        repository: nommu-moose/monpy_binary # IMPORTANT: Change this
+        path: binary-repo
+        token: ${{ secrets.BINARY_REPO_PAT }} # A PAT with repo access
+
+    - name: Publish to Binary Repo
+      run: |
+        # Configure git user for the commit
+        cd binary-repo
+        git config --global user.name 'github-actions[bot]'
+        git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+        
+        # Clear old files from the binary repo
+        git rm -rf ./* || true
+        
+        # Copy the compiled source tree and project files
+        cp -r ../direct-repo/compiled_src/* .
+        cp ../direct-repo/pyproject.toml .
+        cp ../direct-repo/README.md .
+        cp ../direct-repo/LICENSE .
+        
+        # Commit the new version to the binary repo
+        git add .
+        if [ -n "$(git status --porcelain)" ]; then
+          git commit -m "Publish binary release for tag ${{ github.ref_name }}"
+          git push
+        else
+          echo "No changes to commit."
+        fi
