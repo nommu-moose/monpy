@@ -51,23 +51,19 @@ jobs:
         mv src compiled_src
         mv src_original src
 
-    - name: Checkout Binary Repo
-      uses: actions/checkout@v4
-      with:
-        repository: nommu-moose/monpy_binary # IMPORTANT: Change this
-        path: binary-repo
-        token: ${{ secrets.BINARY_REPO_PAT }} # A PAT with repo access
-
     - name: Publish to Binary Repo
       run: |
-        echo "--- Contents of the direct-repo after build ---"
-        ls -R ../direct-repo
+        # Set up a new git repo in a temporary directory
+        git clone "https://x-access-token:${{ secrets.BINARY_REPO_PAT }}@github.com/nommu-moose/monpy_binary" binary-repo
+        cd binary-repo
         
         # Configure git user for the commit
-        cd binary-repo
         git config --global user.name 'github-actions[bot]'
         git config --global user.email 'github-actions[bot]@users.noreply.github.com'
         
+        # If the repo was empty, we need to be on a branch
+        git checkout -b main || git checkout main
+
         # Clear old files from the binary repo
         git rm -rf ./* || true
         
@@ -77,17 +73,14 @@ jobs:
         cp ../direct-repo/README.md .
         cp ../direct-repo/LICENSE .
 
-        echo "--- Contents of the binary-repo before commit ---"
-        ls -R .
-
         echo "--- Git status before commit ---"
         git status
         
-        # Commit the new version to the binary repo
+        # Commit and push the new version
         git add .
         if [ -n "$(git status --porcelain)" ]; then
           git commit -m "Publish binary release for tag ${{ github.ref_name }}"
-          git push
+          git push --set-upstream -f origin main
         else
           echo "No changes to commit."
         fi
