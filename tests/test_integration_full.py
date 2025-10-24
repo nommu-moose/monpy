@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import io
 import time
 from datetime import date
@@ -5,8 +7,9 @@ from datetime import date
 import pytest
 
 from monpy import Session
-from monpy.oo.enums import WebhookEventType
 from monpy.exceptions import MondayAPIError, FeatureNotSupported
+from monpy.oo import WebhookEventType
+from .webhook_utils import expect_webhook_events
 
 
 @pytest.mark.live

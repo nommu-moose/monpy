@@ -7,8 +7,9 @@ import pytest
 import requests
 
 from monpy import Session
+from monpy.oo import WebhookEventType
+from monpy.oo import parse_webhook
 from monpy.helpers import parse_monday_webhook_request
-from monpy.oo.enums import WebhookEventType
 from monpy.exceptions import MondayAPIError
 
 

@@ -23,7 +23,7 @@ from monpy.oo.webhooks.events import (
 )
 from monpy.oo.webhooks.signature import verify_signature
 from monpy.helpers import parse_monday_webhook_request
-from monpy.oo.enums import WebhookEventType
+from monpy.oo import WebhookEventType
 
 
 def test_parse_create_item_event():

@@ -1,7 +1,7 @@
-from monpy.oo.enums import WorkspaceKind, BoardKind, BoardState, ItemState, ColumnType
+from monpy.oo import WorkspaceKind, BoardKind, BoardState, ItemState, ColumnType
 
 
-def test_enums_values_exist():
+def test_workspace_kind_values():
     assert WorkspaceKind.OPEN.value == "open"
     assert BoardKind.PUBLIC.value == "public"
     assert BoardState.ACTIVE.value == "active"

@@ -19,9 +19,9 @@ from inventory_usage import _load_config, _build_client_from_config
 from typing import Optional
 from monpy.oo import Item
 from monpy.oo import Board
-from monpy.oo.enums import BoardKind
+from monpy.oo import BoardKind
 from monpy.oo import Column
-from monpy.oo.enums import ColumnType
+from monpy.oo import ColumnType
 
 
 from typing import Iterable, Optional
