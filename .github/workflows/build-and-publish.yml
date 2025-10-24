@@ -67,8 +67,9 @@ jobs:
         # Clear old files from the binary repo
         git rm -rf ./* || true
         
-        # Copy the compiled source tree and project files
-        cp -r ../direct-repo/compiled_src/* .
+        # Copy the compiled source tree and project files, preserving the src layout
+        mkdir -p src
+        cp -r ../direct-repo/compiled_src/monpy ./src/
         cp ../direct-repo/pyproject.toml .
         cp ../direct-repo/README.md .
         cp ../direct-repo/LICENSE .
