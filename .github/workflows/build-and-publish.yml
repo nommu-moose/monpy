@@ -42,10 +42,13 @@ jobs:
         
         python setup.py build_ext --inplace
         
-        # 3. Clean up source files, leaving only compiled binaries, type hints, and __init__.py
-        find src -type f \( -name "*.py" ! -name "__init__.py" \) -delete
+        # 3. Keep obfuscated .py files as cross-platform fallback; clean only intermediates
         find src -type f -name "*.c" -delete
         find src -type f -name "*.pyc" -delete
+        
+        # Mark this tree as precompiled so setup.py can skip recompilation on install
+        mkdir -p src/monpy
+        echo "1" > src/monpy/_precompiled.marker
 
         # 4. Move the result to a new directory and restore original source
         mv src compiled_src
