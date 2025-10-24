@@ -2332,22 +2332,22 @@ class MondayClient:
             if not (any("cannot query field \"change_item_name\"" in m for m in msgs) or any("unknown field" in m and "change_item_name" in m for m in msgs)):
                 raise
 
-        # Robust fallback: use generic change_column_value with required board_id
-        # Discover the item's board id first (works across API variants)
-        try:
-            item = self.get_item_values(item_id, include_board=True, parse_json_values=False)
-            board = item.get("board") or {}
-            board_id = str(board.get("id")) if board.get("id") is not None else None
-        except Exception:
-            board_id = None
+            # Robust fallback: use generic change_column_value with required board_id
+            # Discover the item's board id first (works across API variants)
+            try:
+                item = self.get_item_values(item_id, include_board=True, parse_json_values=False)
+                board = item.get("board") or {}
+                board_id = str(board.get("id")) if board.get("id") is not None else None
+            except Exception:
+                board_id = None
 
-        if not board_id:
-            # If board id couldn't be determined, surface as a resolution error
-            raise BoardResolutionError("Unable to determine board_id for item rename fallback") from exc
+            if not board_id:
+                # If board id couldn't be determined, surface as a resolution error
+                raise BoardResolutionError("Unable to determine board_id for item rename fallback") from exc
 
-        # Use the helper that always includes board_id
-        self.update_item_single_column(board_id, item_id, column_id="name", value=name)
-        return
+            # Use the helper that always includes board_id
+            self.update_item_single_column(board_id, item_id, column_id="name", value=name)
+            return
 
     def archive_item(self, item_id: str) -> None:
         """Archive an item (moves to board archive)."""
