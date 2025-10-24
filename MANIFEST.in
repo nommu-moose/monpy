@@ -1,0 +1,24 @@
+# Include essential project files
+include README.md
+include LICENSE
+include pyproject.toml
+include setup.py
+
+# Include all package files
+recursive-include src/monpy *.py
+recursive-include src/monpy *.pyd
+recursive-include src/monpy *.so
+include src/monpy/py.typed
+
+# Exclude compiled Python files
+global-exclude *.pyc
+global-exclude *.pyo
+global-exclude __pycache__
+
+# Exclude build artifacts
+global-exclude *.c
+global-exclude *.cpp
+prune build
+prune dist
+prune *.egg-info
+

@@ -7,71 +7,187 @@ on:
   workflow_dispatch: # Allows you to run this workflow manually from the Actions tab
 
 jobs:
-  build-and-publish:
+  prepare-source:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write # Required to push to the binary repo
-
     steps:
     - name: Checkout Direct Repo
       uses: actions/checkout@v4
-      with:
-        path: direct-repo
 
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.10'
 
-    - name: Install build dependencies
+    - name: Install obfuscation tools
       run: |
         python -m pip install --upgrade pip
-        pip install cython setuptools py-obfuscate
+        pip install py-obfuscate
 
     - name: Prepare Obfuscated Source
-      working-directory: ./direct-repo
       run: |
-        # 1. Obfuscate source code. We will not compile it here.
-        # The user's machine will compile it upon installation.
+        # Obfuscate source code
         cp -r src/ obfuscated_src/
         py-obfuscate --in-place --remove-docstrings obfuscated_src/ || echo "Obfuscation failed, continuing without it."
+        
+        # Replace src with obfuscated version for building
+        rm -rf src/
+        mv obfuscated_src/ src/
+
+    - name: Upload prepared source
+      uses: actions/upload-artifact@v4
+      with:
+        name: prepared-source
+        path: |
+          src/
+          setup.py
+          pyproject.toml
+          README.md
+          LICENSE
+
+  build-wheels:
+    needs: prepare-source
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+    - name: Download prepared source
+      uses: actions/download-artifact@v4
+      with:
+        name: prepared-source
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install cibuildwheel
+      run: python -m pip install cibuildwheel==2.16.2
+
+    - name: Build wheels
+      run: python -m cibuildwheel --output-dir wheelhouse
+      env:
+        # Build for Python 3.10, 3.11, 3.12
+        CIBW_BUILD: cp310-* cp311-* cp312-*
+        # Skip 32-bit builds and musl Linux (can add musl if needed)
+        CIBW_SKIP: "*-win32 *-manylinux_i686 *-musllinux_*"
+        # Install Cython before building
+        CIBW_BEFORE_BUILD: pip install cython setuptools
+        # Run tests after building (optional - can be removed if too slow)
+        # CIBW_TEST_REQUIRES: pytest
+        # CIBW_TEST_COMMAND: pytest {project}/tests -m "not live"
+
+    - name: Verify wheel contents (check for .py files except __init__.py)
+      shell: bash
+      run: |
+        pip install wheel
+        for whl in wheelhouse/*.whl; do
+          echo "Checking $whl..."
+          # List contents and look for .py files (excluding __init__.py)
+          unzip -l "$whl" | grep "\.py$" | grep -v "__init__\.py" || echo "✓ No source .py files found (except __init__.py)"
+          # Verify binary files exist
+          if unzip -l "$whl" | grep -E "\.(pyd|so)$"; then
+            echo "✓ Binary files (.pyd/.so) found"
+          else
+            echo "⚠ Warning: No binary files found in wheel"
+          fi
+        done
+
+    - name: Upload wheels
+      uses: actions/upload-artifact@v4
+      with:
+        name: wheels-${{ matrix.os }}
+        path: ./wheelhouse/*.whl
+
+  build-sdist:
+    needs: prepare-source
+    runs-on: ubuntu-latest
+    steps:
+    - name: Download prepared source
+      uses: actions/download-artifact@v4
+      with:
+        name: prepared-source
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install build tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install build
+
+    - name: Build source distribution
+      run: python -m build --sdist
+
+    - name: Upload sdist
+      uses: actions/upload-artifact@v4
+      with:
+        name: sdist
+        path: dist/*.tar.gz
+
+  publish:
+    needs: [build-wheels, build-sdist]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout Direct Repo (for metadata)
+      uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: dist-artifacts
+
+    - name: Prepare distribution files
+      run: |
+        mkdir -p dist
+        # Collect all wheels and sdist
+        find dist-artifacts -name "*.whl" -exec cp {} dist/ \;
+        find dist-artifacts -name "*.tar.gz" -exec cp {} dist/ \;
+        ls -lh dist/
 
     - name: Publish to Binary Repo
       run: |
-        # Set up a new git repo in a temporary directory
+        # Clone binary repo
         git clone "https://x-access-token:${{ secrets.BINARY_REPO_PAT }}@github.com/nommu-moose/monpy_binary" binary-repo
         cd binary-repo
         
-        # Configure git user for the commit
+        # Configure git
         git config --global user.name 'github-actions[bot]'
         git config --global user.email 'github-actions[bot]@users.noreply.github.com'
         
-        # If the repo was empty, we need to be on a branch
+        # Set up branch
         git checkout -b main || git checkout main
 
-        # Clear old files from the binary repo
+        # Clear old files
         git rm -rf ./* || true
         
-        # Copy the full source distribution structure (obfuscated)
-        mkdir -p src
-        cp -r ../direct-repo/obfuscated_src/monpy ./src/
-        cp ../direct-repo/pyproject.toml .
-        cp ../direct-repo/setup.py .
-        cp ../direct-repo/README.md .
-        cp ../direct-repo/LICENSE .
+        # Copy prepared source and built wheels
+        cp -r ../dist-artifacts/prepared-source/src ./
+        cp ../dist-artifacts/prepared-source/pyproject.toml .
+        cp ../dist-artifacts/prepared-source/setup.py .
+        cp ../dist-artifacts/prepared-source/README.md .
+        cp ../dist-artifacts/prepared-source/LICENSE .
+        
+        # Copy pre-built wheels for users who want them
+        mkdir -p wheels
+        cp ../dist/*.whl wheels/ || true
+        cp ../dist/*.tar.gz . || true
 
         echo "--- Git status before commit ---"
         git status
         
-        # Commit and push the new version
+        # Commit and push
         git add .
         if [ -n "$(git status --porcelain)" ]; then
           git commit -m "Publish binary release for tag ${{ github.ref_name }}"
-          
-          # Push the main branch, overwriting its history
           git push --set-upstream -f origin main
-          
-          # Create and push a tag that matches the release, overwriting it if it exists
           git tag -f ${{ github.ref_name }}
           git push -f origin refs/tags/${{ github.ref_name }}
         else

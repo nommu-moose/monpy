@@ -48,7 +48,11 @@ where = ["src"]
 version = {attr = "monpy.__version__"}
 
 [tool.setuptools.package-data]
-monpy = ["**/*.pyd", "**/*.so", "py.typed"]
+monpy = ["**/*.pyd", "**/*.so", "**/__init__.py", "py.typed"]
+
+# Exclude cythonized .py files from the wheel (keep only __init__.py)
+[tool.setuptools.exclude-package-data]
+monpy = ["**/*.py", "**/*.pyc", "**/*.pyo"]
 
 [tool.hatch.envs.default]
 dependencies = [
