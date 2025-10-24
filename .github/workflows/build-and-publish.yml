@@ -80,7 +80,13 @@ jobs:
         git add .
         if [ -n "$(git status --porcelain)" ]; then
           git commit -m "Publish binary release for tag ${{ github.ref_name }}"
+          
+          # Push the main branch, overwriting its history
           git push --set-upstream -f origin main
+          
+          # Create and push a tag that matches the release, overwriting it if it exists
+          git tag -f ${{ github.ref_name }}
+          git push -f origin refs/tags/${{ github.ref_name }}
         else
           echo "No changes to commit."
         fi
