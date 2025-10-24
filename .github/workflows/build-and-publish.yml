@@ -53,7 +53,8 @@ jobs:
         git rm -rf ./* || true
         
         # Copy the full source distribution structure (obfuscated)
-        cp -r ../direct-repo/obfuscated_src/* ./src/
+        mkdir -p src
+        cp -r ../direct-repo/obfuscated_src/monpy ./src/
         cp ../direct-repo/pyproject.toml .
         cp ../direct-repo/setup.py .
         cp ../direct-repo/README.md .
