@@ -1,6 +1,6 @@
 [build-system]
-requires = ["hatchling>=1.25", "cython", "setuptools", "py-obfuscate"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=65", "wheel", "cython", "py-obfuscate"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "monpy"
@@ -37,22 +37,11 @@ Documentation = "https://github.com/your-org/monpy#readme"
 [tool.hatch.version]
 path = "src/monpy/__init__.py"
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/monpy"]
-include = [
-  "src/monpy/py.typed",
-  "src/monpy/**/*.pyd",
-  "src/monpy/**/*.so",
-]
+[tool.setuptools]
+package-dir = {"" = "src"}
 
-[tool.hatch.build.targets.sdist]
-include = [
-  "src/monpy/**",
-  "README.md",
-  "pyproject.toml",
-  "LICENSE",
-  "tests/**",
-]
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.hatch.envs.default]
 dependencies = [
