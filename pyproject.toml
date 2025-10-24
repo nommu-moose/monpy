@@ -44,6 +44,9 @@ zip-safe = false
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.dynamic]
+version = {attr = "monpy.__version__"}
+
 [tool.setuptools.package-data]
 monpy = ["**/*.pyd", "**/*.so", "py.typed"]
 
