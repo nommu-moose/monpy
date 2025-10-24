@@ -42,8 +42,8 @@ jobs:
         
         python setup.py build_ext --inplace
         
-        # 3. Clean up source files, leaving only compiled binaries and type hints
-        find src -type f -name "*.py" -delete
+        # 3. Clean up source files, leaving only compiled binaries, type hints, and __init__.py
+        find src -type f \( -name "*.py" ! -name "__init__.py" \) -delete
         find src -type f -name "*.c" -delete
         find src -type f -name "*.pyc" -delete
 
