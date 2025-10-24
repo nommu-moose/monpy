@@ -60,6 +60,9 @@ jobs:
 
     - name: Publish to Binary Repo
       run: |
+        echo "--- Contents of the direct-repo after build ---"
+        ls -R ../direct-repo
+        
         # Configure git user for the commit
         cd binary-repo
         git config --global user.name 'github-actions[bot]'
@@ -73,6 +76,12 @@ jobs:
         cp ../direct-repo/pyproject.toml .
         cp ../direct-repo/README.md .
         cp ../direct-repo/LICENSE .
+
+        echo "--- Contents of the binary-repo before commit ---"
+        ls -R .
+
+        echo "--- Git status before commit ---"
+        git status
         
         # Commit the new version to the binary repo
         git add .
