@@ -168,7 +168,10 @@ def main() -> int:
         for b in boards:
             items = getattr(b, "items", [])
             print(f"  - Board: {b.name or ''} ({b.id}) items={len(items)}")
-            print(items[0])
+            try:
+                print(items[0])
+            except IndexError:
+                pass
 
     print("\n" + "=" * 70)
     print("DETAILED INVENTORY (with decoded column values)")
