@@ -174,6 +174,124 @@ Helpers
   print(res["item_id"], res["board_id"])  # created and set values
   ```
 
+## Inventory Helpers
+
+The inventory helpers batch-fetch workspaces, boards, and items from monday.com into object-oriented structures.
+
+### Basic Inventory
+
+Use `build_workspace_board_item_tree()` to fetch the lightweight structure (names and IDs only):
+
+```python
+from monpy import Session, build_workspace_board_item_tree
+
+session = Session(client)
+workspaces = build_workspace_board_item_tree(session)
+
+for ws in workspaces:
+    print(f"Workspace: {ws.name}")
+    for board in ws.boards:
+        print(f"  Board: {board.name} ({len(board.items)} items)")
+        for item in board.items:
+            print(f"    Item: {item.name}")
+```
+
+### Detailed Inventory with Decoded Values
+
+Use `build_detailed_workspace_board_item_tree()` to fetch full column values with automatic type decoding:
+
+```python
+from monpy import Session, build_detailed_workspace_board_item_tree
+
+session = Session(client)
+workspaces = build_detailed_workspace_board_item_tree(
+    session,
+    include_decoded_values=True,
+    page_size_items=200,
+    items_batch_size=20,
+)
+
+for ws in workspaces:
+    print(f"Workspace: {ws.name}")
+    for board in ws.boards:
+        print(f"  Board: {board.name}")
+        for item in board.items:
+            print(f"    Item: {item.name}")
+            # Access decoded column values
+            decoded = getattr(item, "decoded_values", {})
+            for col_title, col_value in decoded.items():
+                # Values are automatically decoded from JSON/raw formats
+                # - Status → string label
+                # - Date → ISO date string
+                # - People → list of IDs
+                # - Location → LocationValue object with structured data
+                # - etc.
+                print(f"      {col_title}: {col_value}")
+```
+
+#### Multithreading and Rate Limit Retries
+
+Both inventory functions support multithreaded fetching with automatic rate limit retries:
+
+```python
+from monpy import Session, build_detailed_workspace_board_item_tree
+
+session = Session(client)
+workspaces = build_detailed_workspace_board_item_tree(
+    session,
+    include_decoded_values=True,
+    num_threads=4,          # Fetch items from 4 boards concurrently (default: 4)
+    max_retries=4,          # Retry rate-limited requests up to 4 times (default: 4)
+    page_size_items=200,    # Items per page
+    items_batch_size=20,    # Batch size for workspaces
+)
+```
+
+**Parameters:**
+- `num_threads` (int, default=4): Number of concurrent threads to use for fetching items from boards. Higher values = faster but more API calls.
+- `max_retries` (int, default=4): Number of retry attempts for rate-limited requests. Uses exponential backoff: 1s, 2s, 4s, 8s.
+
+**Rate Limit Handling:**
+- Automatically retries on `RateLimitError` with exponential backoff
+- Non-rate-limit errors are raised immediately
+- Thread-safe: each thread manages its own retry logic
+
+#### Features
+
+- **Automatic Type Decoding**: All column values are decoded using the same logic as the upsert helper (but reversed)
+- **Multithreaded Fetching**: Fetch items from multiple boards concurrently
+- **Rate Limit Retries**: Automatic exponential backoff retry on rate limits
+- **OO Structure**: Returns bound OO objects (Workspace, Board, Item) with Session context
+- **Optional Values**: Pass `include_decoded_values=False` to skip value decoding and improve performance
+- **Comprehensive Support**: Handles all column types: text, status, date, numbers, people, board_relation, tags, location, link, doc
+
+#### Value Decoding Examples
+
+The function automatically decodes monday.com's raw values:
+
+```python
+# Status: raw JSON → human-readable label
+"status": "In Progress"  # instead of {"index": 1}
+
+# Date: ISO string extracted from JSON
+"due_date": "2025-12-31"  # instead of {"date": "2025-12-31"}
+
+# People: list of person IDs
+"assignee": [12345, 67890]  # instead of {"personsAndTeams": [{"id": 12345, ...}]}
+
+# Location: structured LocationValue object
+"location": LocationValue(
+    address="123 Main St",
+    city="New York",
+    state="NY",
+    lat=40.7128,
+    lng=-74.0060,
+)
+
+# Board Relations: list of connected item IDs
+"connected_items": [101, 102]  # instead of {"item_ids": [101, 102]}
+```
+
 Development
 -----------
 

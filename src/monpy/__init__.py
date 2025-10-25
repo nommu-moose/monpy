@@ -26,7 +26,7 @@ from .exceptions import (
     GraphQLError,
 )
 from .oo import Session
-from .helpers import build_workspace_board_item_tree
+from .helpers import build_workspace_board_item_tree, build_detailed_workspace_board_item_tree
 
 __all__ = [
     "MondayClient",
@@ -54,6 +54,7 @@ __all__ = [
     "GraphQLError",
     "Session",
     "build_workspace_board_item_tree",
+    "build_detailed_workspace_board_item_tree",
     "__version__",
 ]
 
