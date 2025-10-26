@@ -9,7 +9,6 @@ import pytest
 from monpy import Session
 from monpy.exceptions import MondayAPIError, FeatureNotSupported
 from monpy.oo import WebhookEventType
-from .webhook_utils import expect_webhook_events
 
 
 @pytest.mark.live

@@ -427,9 +427,33 @@ def build_detailed_workspace_board_item_tree(
     return workspaces
 
 
+def get_inventory(
+    client: MondayClient | None = None,
+    token: str | None = None,
+    **kwargs,
+) -> List[Workspace]:
+    """
+    High-level helper to get a full inventory of workspaces, boards, and items.
+
+    Either a `client` instance or an API `token` must be provided.
+
+    Returns:
+        A list of Workspace objects, with `boards` attached to each, and `items`
+        attached to each board.
+    """
+    if not client and not token:
+        raise ValueError("Either 'client' or 'token' must be provided.")
+    if not client:
+        client = MondayClient(token=token)  # type: ignore[arg-type]
+
+    session = Session(client)
+    return build_workspace_board_item_tree(session, **kwargs)
+
+
 __all__ = [
     "build_workspace_board_item_tree",
     "build_detailed_workspace_board_item_tree",
+    "get_inventory",
 ]
 
 

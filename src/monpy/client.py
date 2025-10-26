@@ -733,9 +733,7 @@ class MondayClient:
             board_kind: $kind,
             workspace_id: $ws,
             template_id: $template
-          ) {{
-            {field_str}
-          }}
+          ) {{ {field_str} }}
         }}
         """
         vars = {
@@ -744,6 +742,7 @@ class MondayClient:
             "ws": workspace_id,
             "template": template_id,
         }
+
         return self.mutation(m, vars)["create_board"]
 
     # 4. Archive (delete) a board --------------------------------------
