@@ -193,17 +193,23 @@ def _encode_value_for_type(column_type: str | None, value: Any) -> Any:
             return {"date": value.isoformat()}
         return value
     if t in ("email",):
-        # Accept str email or {email, text}
+        # Email columns only accept plain strings according to Monday.com API
         if isinstance(value, str):
             return value
         if isinstance(value, Mapping):
-            out: Dict[str, Any] = {}
-            if value.get("email"):
-                out["email"] = value.get("email")
-            if value.get("text"):
-                out["text"] = value.get("text")
-            return out
-        return value
+            # Extract just the email address from dict format, ignore text
+            email_val = value.get("email")
+            if email_val:
+                return str(email_val).strip()
+            # Fallback to any other key that might contain an email
+            for key in ("email_address", "value", "text"):
+                val = value.get(key)
+                if val and isinstance(val, str):
+                    return val.strip()
+        if value is None:
+            return ""
+        # Fallback: convert to string
+        return str(value).strip() if value else ""
     if t in ("people", "person"):
         if value is None:
             return {"personsAndTeams": []}
