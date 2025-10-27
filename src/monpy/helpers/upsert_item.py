@@ -195,7 +195,7 @@ def _encode_value_for_type(column_type: str | None, value: Any) -> Any:
     if t in ("email",):
         # Accept str email or {email, text}
         if isinstance(value, str):
-            return {"email": value}
+            return value
         if isinstance(value, Mapping):
             out: Dict[str, Any] = {}
             if value.get("email"):

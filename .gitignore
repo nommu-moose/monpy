@@ -16,3 +16,6 @@ htmlcov/
 /tests/.last_run.txt
 /tests/.last_run_all_live.txt
 /tests/.last_run_status_labels.txt
+/hs_err_pid33424.log
+/hs_err_pid38560.log
+/reference_for_other_codebase/
