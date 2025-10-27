@@ -193,23 +193,21 @@ def _encode_value_for_type(column_type: str | None, value: Any) -> Any:
             return {"date": value.isoformat()}
         return value
     if t in ("email",):
-        # Email columns only accept plain strings according to Monday.com API
+        # Email columns: always send as an object with both email and text
         if isinstance(value, str):
-            return value
+            v = value.strip()
+            return {"email": v, "text": v}
         if isinstance(value, Mapping):
-            # Extract just the email address from dict format, ignore text
-            email_val = value.get("email")
-            if email_val:
-                return str(email_val).strip()
-            # Fallback to any other key that might contain an email
-            for key in ("email_address", "value", "text"):
-                val = value.get(key)
-                if val and isinstance(val, str):
-                    return val.strip()
+            email_val = value.get("email") or value.get("email_address") or value.get("value") or value.get("text")
+            email_str = str(email_val).strip() if isinstance(email_val, str) else (str(email_val).strip() if email_val is not None else "")
+            text_val = value.get("text")
+            text_str = str(text_val).strip() if isinstance(text_val, str) else email_str
+            return {"email": email_str, "text": text_str}
         if value is None:
-            return ""
-        # Fallback: convert to string
-        return str(value).strip() if value else ""
+            return {"email": "", "text": ""}
+        # Fallback: coerce to string for both fields
+        vv = str(value).strip()
+        return {"email": vv, "text": vv}
     if t in ("people", "person"):
         if value is None:
             return {"personsAndTeams": []}
