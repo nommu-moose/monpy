@@ -233,11 +233,35 @@ def _encode_value_for_type(column_type: str | None, value: Any) -> Any:
             ids = [int(value)]
         return {"tag_ids": ids}
     if t in ("link",):
+        # Normalize link values: require absolute URLs for the 'url' field; otherwise, use text-only
+        def _is_abs_url(s: str) -> bool:
+            ss = s.strip().lower()
+            return ss.startswith("http://") or ss.startswith("https://") or ss.startswith("mailto:") or ss.startswith("tel:")
         if isinstance(value, tuple) and len(value) == 2:
-            return {"url": str(value[0]), "text": str(value[1])}
+            url_s = str(value[0]) if value[0] is not None else ""
+            text_s = str(value[1]) if value[1] is not None else ""
+            if _is_abs_url(url_s):
+                return {"url": url_s, "text": text_s or url_s}
+            # Demote to text-only if not an absolute URL
+            return {"text": text_s or url_s}
         if isinstance(value, str):
-            return {"url": value}
-        return value
+            s = value.strip()
+            if _is_abs_url(s):
+                return {"url": s, "text": s}
+            # Relative or invalid URL → send as text only
+            return {"text": s}
+        if isinstance(value, Mapping):
+            url_val = value.get("url")
+            text_val = value.get("text")
+            url_s = str(url_val).strip() if isinstance(url_val, str) else (str(url_val).strip() if url_val is not None else "")
+            text_s = str(text_val).strip() if isinstance(text_val, str) else ""
+            if _is_abs_url(url_s):
+                return {"url": url_s, "text": text_s or url_s}
+            # No absolute URL – prefer text if provided, otherwise use url as text
+            t_out = text_s or url_s
+            return {"text": t_out}
+        # Fallback: stringify and treat as text
+        return {"text": str(value).strip() if value is not None else ""}
     if t in ("location",):
         if value is None:
             return {}
