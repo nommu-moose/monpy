@@ -160,3 +160,26 @@ def fetch_all_account_users(client: MondayClient) -> List[AccountUser]:
     if last_err:
         raise last_err
     return []
+
+
+def fetch_all_account_users_from_token(token: str) -> List[AccountUser]:
+    """Convenience wrapper that builds a client from a token and fetches users.
+
+    Parameters
+    ----------
+    token : str
+        monday.com API token with the necessary permissions.
+
+    Returns
+    -------
+    List[AccountUser]
+        List of all users on the account, identical to ``fetch_all_account_users``.
+
+    Raises
+    ------
+    GraphQLError or HTTPError
+        Propagated from the underlying client request if fetching fails.
+    """
+
+    client = MondayClient(token=token)
+    return fetch_all_account_users(client)

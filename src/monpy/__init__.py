@@ -1,4 +1,4 @@
-__version__ = "0.1.26"
+__version__ = "0.1.27"
 
 from .client import MondayClient
 from .exceptions import (
@@ -39,7 +39,11 @@ from .helpers import (
     batch_upsert_items,
     batch_upsert_items_from_dicts,
     build_workspace_board_item_tree,
+    ensure_board_columns,
+    upsert_item_values,
     fetch_all_account_users,
+    fetch_all_account_users_from_token,
+    upload_file_to_column_from_token,
     upsert_item,
     upsert_item_from_dicts,
     upsert_subitem,
@@ -81,6 +85,8 @@ __all__ = [
     "GraphQLError",
     "Session",
     "build_workspace_board_item_tree",
+    "ensure_board_columns",
+    "upsert_item_values",
     "AccountUser",
     "BoardSpec",
     "ColumnSpec",
@@ -94,6 +100,8 @@ __all__ = [
     "batch_upsert_items",
     "batch_upsert_items_from_dicts",
     "fetch_all_account_users",
+    "fetch_all_account_users_from_token",
+    "upload_file_to_column_from_token",
     "upsert_item",
     "upsert_item_from_dicts",
     "upsert_subitem",
