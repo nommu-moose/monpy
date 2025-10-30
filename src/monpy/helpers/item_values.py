@@ -7,6 +7,7 @@ from ..exceptions import ItemNotFound, MondayAPIError
 from .upsert_item import _encode_value_for_type, _ensure_group
 
 
+
 def upsert_item_values(
     token: str,
     *,
@@ -28,6 +29,9 @@ def upsert_item_values(
     columns: list of {"column_id": str, "value": Any}
         Column IDs and values to set. If a column_id is "name", it sets the item name.
         Values are encoded according to each column's type.
+        Optionally, a column entry may also include a "type" to be used as a
+        fallback when board metadata isn't available. For people columns, pass a
+        list[str] of account IDs; they will be encoded to personsAndTeams.
     item_id: Optional[str]
         If provided, update this item when it exists; otherwise create a new one.
     item_name: Optional[str]
@@ -68,7 +72,9 @@ def upsert_item_values(
             if v is not None:
                 name_to_set = str(v)
             continue
-        col_type = type_by_id.get(cid_s)
+        # Prefer live board metadata for type; fallback to explicitly provided spec type
+        explicit_type = spec.get("type")
+        col_type = type_by_id.get(cid_s) or (str(explicit_type).strip() if explicit_type else None)
         encoded = _encode_value_for_type(col_type, spec.get("value"))
         values[cid_s] = encoded
 

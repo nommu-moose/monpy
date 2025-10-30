@@ -36,6 +36,12 @@ from .item_values import (
 from .files import (
     upload_file_to_column_from_token,
 )
+from .item_ids import (
+    list_item_ids_from_token,
+)
+from .delete_item import (
+    delete_item_from_token,
+)
 
 __all__ = [
     "build_workspace_board_item_tree",
@@ -60,6 +66,8 @@ __all__ = [
     "ensure_board_columns",
     "upsert_item_values",
     "upload_file_to_column_from_token",
+    "list_item_ids_from_token",
+    "delete_item_from_token",
 ]
 
 

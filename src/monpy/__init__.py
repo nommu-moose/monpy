@@ -1,4 +1,4 @@
-__version__ = "0.1.27"
+__version__ = "0.1.28"
 
 from .client import MondayClient
 from .exceptions import (
@@ -44,6 +44,8 @@ from .helpers import (
     fetch_all_account_users,
     fetch_all_account_users_from_token,
     upload_file_to_column_from_token,
+    list_item_ids_from_token,
+    delete_item_from_token,
     upsert_item,
     upsert_item_from_dicts,
     upsert_subitem,
@@ -102,6 +104,8 @@ __all__ = [
     "fetch_all_account_users",
     "fetch_all_account_users_from_token",
     "upload_file_to_column_from_token",
+    "list_item_ids_from_token",
+    "delete_item_from_token",
     "upsert_item",
     "upsert_item_from_dicts",
     "upsert_subitem",

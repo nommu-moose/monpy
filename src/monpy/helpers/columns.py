@@ -18,6 +18,8 @@ def _normalize_simple_type(raw: str) -> str:
         return "link"
     if t in ("files", "file"):
         return "file"
+    if t in ("person",):
+        return "people"
     if t in ("connect_boards", "board_relation", "connect"):
         return "board_relation"
     return t
@@ -118,7 +120,7 @@ def ensure_board_columns(
     Each entry in `fields` must have:
       - fieldname: str
       - fieldtype: one of
-          - "text", "phone", "email", "date", "hyperlink", "tags", "files"
+          - "text", "phone", "email", "date", "hyperlink", "tags", "files", "people"
           - {"connect": [<board ids>]}  → connect boards
           - {"status": <RichChoices-like Enum class>}
 
@@ -134,7 +136,7 @@ def ensure_board_columns(
     Each entry in `fields` must have:
       - fieldname: str
       - fieldtype: one of
-          - "text", "phone", "email", "date", "hyperlink", "tags", "files"
+          - "text", "phone", "email", "date", "hyperlink", "tags", "files", "people"
           - {"connect": [<board ids>]}  → connect boards
           - {"status": <RichChoices-like Enum class>}
 

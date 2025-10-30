@@ -371,6 +371,8 @@ def _ensure_group(client: MondayClient, board_id: str, *, group_id: Optional[str
 
 def _normalize_col_type(t: str) -> str:
     tt = (t or "").lower()
+    if tt == "person":
+        return "people"
     if tt == "connect_boards":
         return "board_relation"
     return tt
