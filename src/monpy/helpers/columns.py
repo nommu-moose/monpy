@@ -52,20 +52,20 @@ def _rich_choices_to_status_defaults(choices_cls: object) -> Mapping[str, Any]:
     except Exception:
         members = []
 
-    entries: list[tuple[int, str, str]] = []
+    # Collect raw data first
+    raw_entries: list[tuple[Optional[int], str, str]] = []
     for m in members:
-        # Prefer monday_index; then index; else declaration order via enumerate later
+        # Prefer explicit monday_index; then generic index; else None
         idx_val = _enum_attr(m, "monday_index")
         if idx_val is None:
             idx_val = _enum_attr(m, "index")
         try:
-            idx = int(idx_val) if idx_val is not None else None
+            idx: Optional[int] = int(idx_val) if idx_val is not None else None
         except Exception:
             idx = None
 
         lbl = _enum_attr(m, "label")
         if lbl is None:
-            # Fallbacks: name or value second element
             try:
                 lbl = getattr(m, "name")
             except Exception:
@@ -73,7 +73,6 @@ def _rich_choices_to_status_defaults(choices_cls: object) -> Mapping[str, Any]:
         lbl_s = str(lbl) if lbl is not None else ""
 
         col = _enum_attr(m, "monday_color")
-        # Accept StatusColor, other Enum, or raw string
         if isinstance(col, StatusColor):
             color_s = col.value
         else:
@@ -82,28 +81,36 @@ def _rich_choices_to_status_defaults(choices_cls: object) -> Mapping[str, Any]:
             except Exception:
                 color_s = ""
 
-        entries.append((idx if idx is not None else 10_000 + len(entries), lbl_s, color_s))
+        raw_entries.append((idx, lbl_s, color_s))
 
-    # Sort by explicit index first; then preserve declaration order fallback
-    entries.sort(key=lambda t: t[0])
+    # If a member declares monday_index == 0, omit it entirely so index 0 remains the monday default
+    had_zero = any((idx == 0) for (idx, _, _) in raw_entries)
+    filtered = [(idx, label, color) for (idx, label, color) in raw_entries if idx != 0]
 
-    # Build labels preserving provided indexes when present. If any index was a
-    # placeholder (>= 10_000), remap to contiguous starting at 0.
-    explicit = all(x[0] < 10_000 for x in entries) and any(x[0] == 0 for x in entries)
+    # Determine assignment for entries without explicit index
+    # Start auto-indices at 1 when a zero was present; otherwise start at 0
+    start_index = 1 if had_zero else 0
+    used: set[int] = {int(idx) for (idx, _, _) in filtered if isinstance(idx, int)}
+
+    # Preserve declaration order for assigning indices to None entries
     labels: list[dict] = []
-    if explicit:
-        for idx, label, color in entries:
-            ent: Dict[str, Any] = {"index": int(idx), "label": label}
-            if color:
-                ent["color"] = color
-            labels.append(ent)
-    else:
-        for new_idx, (_, label, color) in enumerate(entries):
-            ent = {"index": new_idx, "label": label}
-            if color:
-                ent["color"] = color
-            labels.append(ent)
+    for (idx, label, color) in filtered:
+        if idx is None:
+            # pick next free index starting at start_index
+            next_idx = start_index
+            while next_idx in used:
+                next_idx += 1
+            used.add(next_idx)
+            real_idx = next_idx
+        else:
+            real_idx = int(idx)
 
+        ent: Dict[str, Any] = {"index": real_idx, "label": label}
+        if color:
+            ent["color"] = color
+        labels.append(ent)
+
+    # If everything was omitted (e.g., only a default at index 0 was provided), return empty labels
     return {"labels": labels}
 
 
