@@ -84,6 +84,21 @@ class ColumnValueError(ValidationError):
     pass
 
 
+class MissingExpectedColumnsError(ValidationError):
+    """Raised when required/configured columns are not present on a board.
+
+    This is typically thrown by higher-level helpers that validate a board's
+    schema against an expected configuration before attempting an upsert.
+    """
+
+    def __init__(self, board_id: str, *, usage: str, missing: list[str]) -> None:
+        msg = f"Board {board_id} missing expected columns for '{usage}': {', '.join(missing)}"
+        super().__init__(msg)
+        self.board_id = board_id
+        self.usage = usage
+        self.missing = missing
+
+
 class PeopleAssignmentError(ValidationError):
     pass
 

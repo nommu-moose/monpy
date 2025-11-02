@@ -1,4 +1,4 @@
-__version__ = "0.1.29"
+__version__ = "0.1.30"
 
 from .client import MondayClient
 from .exceptions import (
@@ -6,6 +6,7 @@ from .exceptions import (
     BoardResolutionError,
     ColumnNotFound,
     ColumnValueError,
+    MissingExpectedColumnsError,
     DocNotFound,
     EmptyUpdateError,
     FeatureNotSupported,
@@ -79,6 +80,7 @@ __all__ = [
     "ValidationError",
     "EmptyUpdateError",
     "ColumnValueError",
+    "MissingExpectedColumnsError",
     "PeopleAssignmentError",
     "LinkedItemsLimitExceeded",
     "NetworkError",
