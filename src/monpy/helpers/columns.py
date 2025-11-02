@@ -52,8 +52,10 @@ def _rich_choices_to_status_defaults(choices_cls: object) -> Mapping[str, Any]:
     except Exception:
         members = []
 
-    # Collect raw data first
-    raw_entries: list[tuple[Optional[int], str, str]] = []
+    # Collect raw data first (including index 0)
+    entries: list[dict] = []
+    used: set[int] = set()
+
     for m in members:
         # Prefer explicit monday_index; then generic index; else None
         idx_val = _enum_attr(m, "monday_index")
@@ -69,49 +71,44 @@ def _rich_choices_to_status_defaults(choices_cls: object) -> Mapping[str, Any]:
             try:
                 lbl = getattr(m, "name")
             except Exception:
-                lbl = None
-        lbl_s = str(lbl) if lbl is not None else ""
+                lbl = ""
+        label = str(lbl) if lbl is not None else ""
 
         col = _enum_attr(m, "monday_color")
         if isinstance(col, StatusColor):
-            color_s = col.value
+            color = col.value
         else:
             try:
-                color_s = str(col).strip().lower() if col is not None else ""
+                color = str(col).strip().lower() if col is not None else ""
             except Exception:
-                color_s = ""
+                color = ""
 
-        raw_entries.append((idx, lbl_s, color_s))
+        entries.append({"index": idx, "label": label, "color": color})
 
-    # If a member declares monday_index == 0, omit it entirely so index 0 remains the monday default
-    had_zero = any((idx == 0) for (idx, _, _) in raw_entries)
-    filtered = [(idx, label, color) for (idx, label, color) in raw_entries if idx != 0]
+    # Reserve explicit indices (including 0) and assign missing ones starting at 0
+    for e in entries:
+        if isinstance(e.get("index"), int):
+            used.add(int(e["index"]))
 
-    # Determine assignment for entries without explicit index
-    # Start auto-indices at 1 when a zero was present; otherwise start at 0
-    start_index = 1 if had_zero else 0
-    used: set[int] = {int(idx) for (idx, _, _) in filtered if isinstance(idx, int)}
-
-    # Preserve declaration order for assigning indices to None entries
-    labels: list[dict] = []
-    for (idx, label, color) in filtered:
-        if idx is None:
-            # pick next free index starting at start_index
-            next_idx = start_index
+    next_idx = 0
+    for e in entries:
+        if e.get("index") is None:
             while next_idx in used:
                 next_idx += 1
+            e["index"] = next_idx
             used.add(next_idx)
-            real_idx = next_idx
-        else:
-            real_idx = int(idx)
+            next_idx += 1
 
-        ent: Dict[str, Any] = {"index": real_idx, "label": label}
-        if color:
-            ent["color"] = color
-        labels.append(ent)
+    # Drop empty color and sort ascending by index
+    out: list[dict] = []
+    for e in entries:
+        ent: Dict[str, Any] = {"index": int(e["index"]), "label": e["label"]}
+        if e.get("color"):
+            ent["color"] = e["color"]
+        out.append(ent)
 
-    # If everything was omitted (e.g., only a default at index 0 was provided), return empty labels
-    return {"labels": labels}
+    out.sort(key=lambda d: d["index"])
+    return {"labels": out}
 
 
 def ensure_board_columns(
