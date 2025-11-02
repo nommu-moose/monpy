@@ -128,6 +128,9 @@ def ensure_board_columns(
           - {"connect": [<board ids>]}  → connect boards
           - {"status": <RichChoices-like Enum class>}
 
+    Optionally, a field dict may include:
+      - title: str  → human title to use when creating a new column (defaults to fieldname)
+
     Parameters
     ----------
     api_key
@@ -155,6 +158,9 @@ def ensure_board_columns(
         name = str(f.get("fieldname") or "").strip()
         if not name:
             continue
+
+        # Use provided human title when present; otherwise fall back to fieldname
+        title = str(f.get("title") or name).strip()
 
         raw_ft = f.get("fieldtype")
         defaults: Optional[Mapping[str, Any]] = None
@@ -187,7 +193,7 @@ def ensure_board_columns(
         specs.append(
             ColumnSpec(
                 type=col_type,
-                title=name,
+                title=title,
                 column_id=str(cid) if cid else None,
                 value=None,
                 defaults=defaults,
