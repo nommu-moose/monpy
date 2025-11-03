@@ -1,4 +1,4 @@
-__version__ = "0.1.35"
+__version__ = "0.1.36"
 
 from .client import MondayClient
 from .exceptions import (

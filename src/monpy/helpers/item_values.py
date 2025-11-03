@@ -29,6 +29,8 @@ def upsert_item_values(
     columns: list of {"column_id": str, "value": Any}
         Column IDs and values to set. If a column_id is "name", it sets the item name.
         Values are encoded according to each column's type.
+        For status-like columns, you may now pass the human label text (e.g. "Done").
+        Index integers remain supported for backward compatibility.
         Optionally, a column entry may also include a "type" to be used as a
         fallback when board metadata isn't available. For people columns, pass a
         list[str] of account IDs; they will be encoded to personsAndTeams.
