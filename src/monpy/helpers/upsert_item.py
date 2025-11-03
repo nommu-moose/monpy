@@ -180,7 +180,7 @@ def _encode_value_for_type(column_type: str | None, value: Any) -> Any:
         return str(value)
     if t in ("numbers", "number"):
         return value
-    if t in ("status",):
+    if t in ("status", "color"):
         if isinstance(value, dict):
             return value
         if isinstance(value, int):
