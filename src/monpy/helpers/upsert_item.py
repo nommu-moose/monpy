@@ -533,7 +533,7 @@ def _resolve_or_create_columns(
                                 lbl = str(v)
                             items.append((idx, lbl))
                         items.sort(key=lambda x: x[0])
-                        return [{"index": i, "label": l} for (i, l) in items]
+                        return [{"index": idx, "label": l} for (idx, l) in items]
 
                     def _ensure_label_colors(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                         out: List[Dict[str, Any]] = []
