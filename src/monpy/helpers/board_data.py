@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date as _date, datetime as _datetime, time as _time
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from ..oo import Session
@@ -81,6 +81,8 @@ def fetch_board_data(
     batch_size: int = 100,
     max_retries: int = 5,
     include_subitems: bool = False,
+    debug: bool = False,
+    logger: Optional[Callable[[str], None]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Fetch item data from a board identified by workspace and board names.
@@ -123,6 +125,17 @@ def fetch_board_data(
 
     client = session.client
 
+    def _log(msg: str) -> None:
+        if not debug:
+            return
+        try:
+            if logger:
+                logger(msg)
+            else:
+                print(f"[fetch_board_data] {msg}")
+        except Exception:
+            pass
+
     # List item ids (and names) on the board (optionally across states)
     states_to_fetch: List[str]
     if isinstance(state, (list, tuple)):
@@ -133,11 +146,13 @@ def fetch_board_data(
         states_to_fetch = [state]
     else:
         states_to_fetch = ["active"]
+    _log(f"states={states_to_fetch}, limit={'None' if limit is None else limit}, include_subitems={include_subitems}")
 
     def _list_all_items_resilient(st: str) -> List[Dict[str, Any]]:
         out: List[Dict[str, Any]] = []
         cur: Optional[str] = None
         remaining: Optional[int] = None if limit is None else int(max(0, int(limit)))
+        page_idx = 0
         while True:
             try:
                 items, cur = _retry_with_backoff(
@@ -155,15 +170,21 @@ def fetch_board_data(
 
             # Some tenants can yield empty pages with a non-null cursor; skip forward
             if not items and cur:
+                page_idx += 1
+                _log(f"page {page_idx} (state={st}): empty page with cursor -> advancing")
                 continue
 
             if not items:
+                _log(f"completed state={st}, total_items={len(out)}")
                 break
 
+            page_idx += 1
+            _log(f"page {page_idx} (state={st}): got {len(items)} items, cursor={'set' if cur else 'None'}")
             out.extend(items)
             if remaining is not None:
                 remaining -= len(items)
                 if remaining <= 0:
+                    _log(f"limit reached: {len(out)} items")
                     break
             if not cur:
                 break
@@ -176,6 +197,7 @@ def fetch_board_data(
         return []
 
     item_ids: List[str] = [str(r.get("id")) for r in rows_meta if r.get("id") is not None]
+    _log(f"top-level item_ids fetched: {len(item_ids)}")
     if not item_ids:
         return []
 
@@ -200,6 +222,7 @@ def fetch_board_data(
                     pass
         if sub_ids:
             all_item_ids.extend(sub_ids)
+        _log(f"subitem ids fetched: {len(sub_ids)}; total ids now: {len(all_item_ids)}")
 
     # Fetch selected column values for all items in efficient batches
     # Rate-limit resilient: fetch in chunks with exponential backoff and
@@ -208,7 +231,8 @@ def fetch_board_data(
         if not ids:
             return []
         try:
-            return _retry_with_backoff(
+            _log(f"values chunk: size={len(ids)}, bs={bs}")
+            ret = _retry_with_backoff(
                 client.get_items_values,
                 ids,
                 include_board=True,  # include board to correctly decode subitems on their hidden board
@@ -219,20 +243,41 @@ def fetch_board_data(
                 batch_size=int(max(1, bs)),
                 max_retries=int(max_retries),
             )
+            # Detect missing IDs (some tenants may under-return per request)
+            try:
+                returned_ids = {str(r.get("id")) for r in (ret or []) if r.get("id") is not None}
+                missing = [i for i in ids if i not in returned_ids]
+            except Exception:
+                missing = []
+            if missing:
+                _log(f"missing {len(missing)} of {len(ids)}; retrying smaller bs")
+                # Re-fetch only missing; reduce batch size to be conservative
+                next_bs = max(1, min(bs // 2, 50))
+                addl = _fetch_chunk(missing, bs=next_bs)
+                # Merge: avoid duplicates
+                id_seen = set(returned_ids)
+                for row in addl:
+                    iid = str(row.get("id")) if row.get("id") is not None else None
+                    if iid and iid not in id_seen:
+                        ret.append(row)
+                        id_seen.add(iid)
+            return ret
         except RateLimitError:
             # Split the chunk and retry recursively when possible
             if len(ids) <= 1:
                 raise
             mid = len(ids) // 2
+            _log(f"rate-limit split: left={mid}, right={len(ids)-mid}")
             left = _fetch_chunk(ids[:mid], bs=max(1, bs // 2))
             right = _fetch_chunk(ids[mid:], bs=max(1, bs // 2))
             return left + right
 
     rows: List[Dict[str, Any]] = []
     step = int(max(1, batch_size))
-    for i in range(0, len(item_ids), step):
-        chunk_ids = item_ids[i : i + step]
+    for i in range(0, len(all_item_ids), step):
+        chunk_ids = all_item_ids[i : i + step]
         rows.extend(_fetch_chunk(chunk_ids, bs=step))
+    _log(f"total rows with values: {len(rows)}")
 
     # Build fast lookup from column id to title/spec for result keys
     id_to_spec: Dict[str, _ResolvedColumn] = {s.id: s for s in specs}

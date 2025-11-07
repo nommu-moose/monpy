@@ -45,6 +45,9 @@ from .delete_item import (
 from .board_data import (
     fetch_board_data,
 )
+from .debug import (
+    enable_graphql_trace,
+)
 
 __all__ = [
     "build_workspace_board_item_tree",
@@ -72,6 +75,7 @@ __all__ = [
     "list_item_ids_from_token",
     "delete_item_from_token",
     "fetch_board_data",
+    "enable_graphql_trace",
 ]
 
 
