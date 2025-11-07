@@ -42,6 +42,9 @@ from .item_ids import (
 from .delete_item import (
     delete_item_from_token,
 )
+from .board_data import (
+    fetch_board_data,
+)
 
 __all__ = [
     "build_workspace_board_item_tree",
@@ -68,6 +71,7 @@ __all__ = [
     "upload_file_to_column_from_token",
     "list_item_ids_from_token",
     "delete_item_from_token",
+    "fetch_board_data",
 ]
 
 
