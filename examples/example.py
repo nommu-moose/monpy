@@ -34,15 +34,44 @@ def _as_bool(v: Any) -> bool:
 
 
 # DEBUG can be set via env (preferred) or tests/config.json
-DEBUG = _as_bool(os.getenv("DEBUG", config.get("DEBUG")))
+DEBUG = True
 
 client = MondayClient(token=token, dev_mode=DEBUG, max_retries=6, backoff=1.5)
 
-# Optional: set TRACE_GRAPHQL=1 to print every GraphQL call (noisy)
-if DEBUG and _as_bool(os.getenv("TRACE_GRAPHQL", "0")):
-    enable_graphql_trace(client, print_success=False)
 
-sess = Session(client, values_cache_ttl=2.0)
+# Optional tracing: set TRACE_GRAPHQL=1 to print every GraphQL call (noisy).
+# You can also set:
+# - TRACE_RESP=1 to print responses
+# - TRACE_MAX to clamp response size (chars)
+# - TRACE_OUT=path/to/file.log to write logs to a file
+if _as_bool(os.getenv("TRACE_GRAPHQL", "0")):
+    trace_success = _as_bool(os.getenv("TRACE_SUCCESS", "0"))
+    trace_resp = _as_bool(os.getenv("TRACE_RESP", "1"))
+    try:
+        trace_max = int(os.getenv("TRACE_MAX", "4000"))
+    except Exception:
+        trace_max = 4000
+    out_path = os.getenv("TRACE_OUT")
+    if out_path:
+        fh = open(out_path, "a", encoding="utf-8")
+        def _logger(line: str) -> None:
+            try:
+                fh.write(line + "\n")
+                fh.flush()
+            except Exception:
+                pass
+    else:
+        _logger = print
+    enable_graphql_trace(
+        client,
+        print_success=trace_success,
+        print_response=trace_resp,
+        response_max_chars=trace_max,
+        logger=_logger,
+    )
+
+
+sess = Session(client, values_cache_ttl=3600)
 
 rows = fetch_board_data(
     sess,
@@ -74,6 +103,7 @@ if DEBUG:
         print(row)
     print(len(rows))
 
+"""
 # Sanity check: count top-level items directly via iterator
 if DEBUG:
     workspaces = client.list_workspaces(limit=100, fields=("id", "name"))
@@ -87,3 +117,13 @@ if DEBUG:
             for _ in client.iter_items(board_id, page_size=200, state="active", fields=["id"]):
                 count += 1
             print("Top-level active items (iterator):", count)
+"""
+
+no_email_count = 0
+for row in rows:
+    if not row['Email']:
+        no_email_count += 1
+        print(', '.join([f"{key}={value}" for key, value in row.items()]))
+
+print(f"no emails: {no_email_count}")
+

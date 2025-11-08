@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date as _date, datetime as _datetime, time as _time
+import json
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from ..oo import Session
 from ..oo.item import Item
 from ..oo.utils import to_attr
+from ..oo.columns.values import _decode_value
 from ..exceptions import RateLimitError
 from .inventory import _retry_with_backoff
 
@@ -50,11 +52,77 @@ def _resolve_columns(session: Session, *, board_id: str, columns: Sequence[Tuple
     bd = session.board(board_id)
     col_collection = bd.columns
 
+    # Access all columns for robust resolution (exact-title preference)
+    try:
+        all_cols = list(getattr(col_collection, "_by_id", {}).values())
+    except Exception:
+        all_cols = []  # fallback to attr-only when unavailable
+
+    def parse_type_hint(hint: str | None) -> tuple[Optional[str], str]:
+        """Return (id_override, normalized_type_hint)."""
+        if not hint:
+            return None, ""
+        raw = str(hint).strip()
+        cid: Optional[str] = None
+        # Simple 'id=<col_id>' token anywhere in the hint
+        if "id=" in raw:
+            try:
+                start = raw.index("id=") + 3
+                end = start
+                while end < len(raw) and (raw[end].isalnum() or raw[end] in {"_", "-", ":"}):
+                    end += 1
+                cid = raw[start:end]
+                raw = (raw[: start - 3] + raw[end:]).replace("||", "|").strip("|,; ")
+            except Exception:
+                pass
+        # Remaining content is the type name (may be empty)
+        return cid, raw.lower()
+
     resolved: List[_ResolvedColumn] = []
     for title, type_hint in columns:
         attr = to_attr(title)
-        col = col_collection.by_attr(attr)
-        t = (str(type_hint or "").strip() or (col.type or "")).lower()
+
+        # 1) Optional id override via type hint (e.g. "email|id=email_mkxbw8tg")
+        id_override, type_token = parse_type_hint(type_hint)
+        col = None
+        if id_override:
+            try:
+                col = col_collection.by_id(id_override)
+            except Exception:
+                col = None
+
+        # 2) Prefer exact title (case-sensitive) match when available
+        if col is None and all_cols:
+            exact = [c for c in all_cols if (c.title or "") == title]
+            if len(exact) == 1:
+                col = exact[0]
+            elif len(exact) > 1:
+                # Disambiguate by type when hinted
+                norm_t = (type_token or "").split(":", 1)[0]
+                if norm_t:
+                    same_t = [c for c in exact if (c.type or "").lower() == norm_t]
+                    if len(same_t) == 1:
+                        col = same_t[0]
+
+        # 3) Case-insensitive title match as secondary heuristic
+        if col is None and all_cols:
+            ci = [c for c in all_cols if (c.title or "").lower() == title.lower()]
+            if len(ci) == 1:
+                col = ci[0]
+            elif len(ci) > 1:
+                norm_t = (type_token or "").split(":", 1)[0]
+                if norm_t:
+                    same_t = [c for c in ci if (c.type or "").lower() == norm_t]
+                    if len(same_t) == 1:
+                        col = same_t[0]
+
+        # 4) Fallback to normalized attribute mapping
+        if col is None:
+            col = col_collection.by_attr(attr)
+
+        # Determine normalized type token or fallback to column's type
+        t = (type_token or (col.type or "")).lower()
+
         # Choose extraction mode
         # - status/email/phone prefer human-readable text
         # - explicit "index" suffix requests status index
@@ -65,6 +133,7 @@ def _resolve_columns(session: Session, *, board_id: str, columns: Sequence[Tuple
             t = t.split(":", 1)[0]
         elif t in ("status", "email", "phone"):
             mode = "text"
+
         resolved.append(_ResolvedColumn(title=title, attr=attr, id=str(col.id), type=col.type, mode=mode, norm_type=t))
 
     return resolved
@@ -304,33 +373,37 @@ def fetch_board_data(
             # Prefer title as key in result
             key = spec.title
             if spec.mode == "decoded":
-                try:
-                    val = getattr(it.values, spec.attr)
-                    # Cast date-like values to Python datetime when requested/typed
-                    if val is not None and spec.norm_type in ("date", "datetime"):
+                # Prefer decoding directly from the row payload to avoid any extra API calls
+                cv = cvs.get(col_id)
+                if cv is not None:
+                    try:
+                        decoded = _decode_value(spec.type or cv.get("type"), cv)
+                    except Exception:
+                        decoded = None
+                    # Optional: cast date string to datetime at midnight when requested
+                    if decoded is not None and spec.norm_type in ("date", "datetime"):
                         try:
-                            if isinstance(val, str) and val:
-                                # Prefer full datetime parsing; fallback to date-only at midnight
+                            if isinstance(decoded, str) and decoded:
                                 dt: Optional[_datetime] = None
                                 try:
-                                    # This expects full ISO with time; may raise ValueError for date-only
-                                    dt = _datetime.fromisoformat(val)
+                                    dt = _datetime.fromisoformat(decoded)
                                 except Exception:
                                     try:
-                                        d = _date.fromisoformat(val)
+                                        d = _date.fromisoformat(decoded)
                                         dt = _datetime.combine(d, _time())
                                     except Exception:
                                         dt = None
-                                out[key] = dt if dt is not None else val
-                            else:
-                                out[key] = val
+                                decoded = dt if dt is not None else decoded
                         except Exception:
-                            out[key] = val
-                    else:
-                        out[key] = val
-                except AttributeError:
-                    # Column disappeared or mismatch – return None
-                    out[key] = None
+                            pass
+                    out[key] = decoded
+                else:
+                    # Fallback to attribute access only if the row did not include the column
+                    try:
+                        val = getattr(it.values, spec.attr)
+                    except AttributeError:
+                        val = None
+                    out[key] = val
             elif spec.mode == "index":
                 try:
                     out[key] = getattr(it.values, f"{spec.attr}_index")
@@ -338,7 +411,32 @@ def fetch_board_data(
                     out[key] = None
             else:  # "text"
                 cv = cvs.get(col_id)
-                out[key] = None if cv is None else cv.get("text")
+                if not cv:
+                    out[key] = None
+                else:
+                    txt = cv.get("text")
+                    if isinstance(txt, str) and txt.strip() == "":
+                        txt = None
+                    # Strengthened fallback for email/phone when text is empty
+                    if txt is None and spec.norm_type in ("email", "phone"):
+                        raw = cv.get("value")
+                        if isinstance(raw, str) and raw and raw[0] in "{[":
+                            try:
+                                raw = json.loads(raw)
+                            except Exception:
+                                pass
+                        if isinstance(raw, dict):
+                            if spec.norm_type == "email":
+                                # Common keys observed for monday email column
+                                cand = raw.get("email") or raw.get("text") or raw.get("value")
+                                txt = cand if isinstance(cand, str) and cand.strip() else None
+                            elif spec.norm_type == "phone":
+                                # Prefer the number itself
+                                cand = raw.get("phone") or raw.get("text") or raw.get("number")
+                                txt = cand if isinstance(cand, str) and cand.strip() else None
+                        elif isinstance(raw, str) and raw.strip():
+                            txt = raw
+                    out[key] = txt
 
         results.append(out)
 
